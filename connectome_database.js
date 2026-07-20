@@ -354,9 +354,6 @@ export const CONNECTOME_DATABASE = {
   },
 
   // ─── Finger Tapping Test → Corticospinal Tract & SMA ────────────────────────
-  // Placeholder — test not yet implemented. Will be populated when the FTT screen
-  // is built. Value will always be null until then → appears as 'untested' in HUD.
-  //
   // AAL: Precentral_L [1], Precentral_R [2], Supp_Motor_Area_L [19], Supp_Motor_Area_R [20]
   fingerTapping: {
     testName: 'Finger Tapping Test',

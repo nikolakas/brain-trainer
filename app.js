@@ -144,16 +144,25 @@ loadingEl.style.cssText = [
 document.body.appendChild(loadingEl);
 const setLoadingText = t => { loadingEl.textContent = t ?? ''; loadingEl.style.display = t ? 'block' : 'none'; };
 
-const _dbgEl = document.createElement('div');
-_dbgEl.id = 'brain-dbg';
-_dbgEl.style.cssText = 'position:fixed;bottom:8px;right:8px;z-index:999;font:10px/1.6 monospace;' +
-  'color:#7af;background:rgba(0,0,0,.75);padding:6px 10px;border-radius:6px;max-width:360px;' +
-  'white-space:pre-wrap;pointer-events:none;max-height:180px;overflow-y:auto;';
-document.body.appendChild(_dbgEl);
+// On-screen boot/status log — opt-in via ?debug in the URL so it doesn't sit on
+// top of the UI (highest z-index in the app) during normal use. Always still
+// logs to the browser console either way.
+const _dbgVisible = new URLSearchParams(location.search).has('debug');
+let _dbgEl = null;
+if (_dbgVisible) {
+  _dbgEl = document.createElement('div');
+  _dbgEl.id = 'brain-dbg';
+  _dbgEl.style.cssText = 'position:fixed;bottom:8px;right:8px;z-index:999;font:10px/1.6 monospace;' +
+    'color:#7af;background:rgba(0,0,0,.75);padding:6px 10px;border-radius:6px;max-width:360px;' +
+    'white-space:pre-wrap;pointer-events:none;max-height:180px;overflow-y:auto;';
+  document.body.appendChild(_dbgEl);
+}
 function _dbg(msg) {
   const ts = new Date().toISOString().slice(11, 19);
-  _dbgEl.textContent += `[${ts}] ${msg}\n`;
-  _dbgEl.scrollTop = _dbgEl.scrollHeight;
+  if (_dbgEl) {
+    _dbgEl.textContent += `[${ts}] ${msg}\n`;
+    _dbgEl.scrollTop = _dbgEl.scrollHeight;
+  }
   console.log('[Brain Trainer]', msg);
 }
 
@@ -212,7 +221,8 @@ let _tracts = [];            // [{ key, tract, testKey, tube, mat, flowTex, from
 let _netEdges = [];          // resting-state / basal-ganglia network tubes (static)
 let _lesions = [];           // surgical-planning lesion spheres
 let _surgicalMode = false;   // click-to-drop-lesion mode
-let _progress = 0;           // 4D longitudinal progression 0 (today) … 1 (+5 yr)
+let _progress = 0;           // 4D longitudinal progression 0 (today) … 1 (+5 yr) — smoothed, rendered value
+let _progressTarget = 0;     // slider's raw target; _progress eases toward this each frame
 let _paused = false;         // true while the NiiVue importer owns the WebGL context
 let _nvReal = null;          // on-demand NiiVue instance (never coexists with Three.js render)
 let _nvCanvas = null;
@@ -255,6 +265,8 @@ const zOffset = 0;
 // ─── Cinematic tour ───────────────────────────────────────────────────────────
 let _cinematic = null, _rafId = null, _lastT = 0;
 let _idleSpin = true, _dragging = false;
+let _spinVelY = 0;           // residual angular velocity (rad/frame) after a drag release — decays into idle spin
+let _camDistTarget = null;   // wheel-zoom target distance; camera eases toward it each frame
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COORDINATE MAPPING
@@ -728,7 +740,17 @@ function _loop(now) {
   const dt = Math.min((now - _lastT) / 1000, 0.05); _lastT = now;
   const t = now / 1000;
 
-  if (_shellMat) _shellMat.uniforms.uTime.value = t;
+  if (_shellMat) {
+    _shellMat.uniforms.uTime.value = t;
+    // Ease the longitudinal-progression slider toward its target instead of
+    // snapping, so scrubbing/clicking the timeline reads as a smooth transition.
+    if (Math.abs(_progressTarget - _progress) > 0.0005) {
+      _progress += (_progressTarget - _progress) * Math.min(1, dt * 3);
+    } else {
+      _progress = _progressTarget;
+    }
+    _shellMat.uniforms.uProgress.value = _progress;
+  }
   for (const tr of _tracts) {
     tr.flowTex.offset.x -= (tr.speed ?? 0.2) * dt;
     const amp = tr.pulseAmp ?? 0;
@@ -745,8 +767,27 @@ function _loop(now) {
     n.core.scale.setScalar(n._pulse ? 1 + 0.12 * Math.sin(t * 4 + n.idx) : 1);
   }
 
-  if (_cinematic) _advanceCinematic(dt);
-  else if (_idleSpin && !_dragging) _brainGroup.rotation.y += 0.0016;
+  if (_cinematic) {
+    _advanceCinematic(dt);
+  } else if (_dragging) {
+    // rotation is driven directly by pointermove while dragging; _spinVelY just
+    // tracks the latest delta so release can pick up the momentum below.
+  } else if (Math.abs(_spinVelY) > 0.0003) {
+    // Momentum flick: let the drag's last angular velocity carry the spin, decaying via friction,
+    // before settling back into the constant idle auto-rotate — reads as a deliberate glide, not a snap.
+    _brainGroup.rotation.y += _spinVelY;
+    _spinVelY *= Math.pow(0.05, dt);   // frame-rate-independent exponential friction
+  } else if (_idleSpin) {
+    _brainGroup.rotation.y += 0.0016;
+  }
+
+  // Wheel-zoom eases toward its target distance instead of jump-cutting per tick.
+  if (_camDistTarget != null) {
+    const cur = _camera.position.length();
+    if (Math.abs(_camDistTarget - cur) > 0.001) {
+      _camera.position.setLength(cur + (_camDistTarget - cur) * Math.min(1, dt * 10));
+    }
+  }
 
   _renderer.render(_scene, _camera);
 }
@@ -964,10 +1005,16 @@ function _closeNiiVue() {
 }
 
 function _installInteraction() {
-  let px = 0, py = 0, downX = 0, downY = 0;
-  canvas.addEventListener('pointerdown', e => { _dragging = true; px = e.clientX; py = e.clientY; downX = e.clientX; downY = e.clientY; canvas.setPointerCapture(e.pointerId); });
+  let px = 0, py = 0, downX = 0, downY = 0, lastMoveT = 0;
+  canvas.addEventListener('pointerdown', e => {
+    _dragging = true; px = e.clientX; py = e.clientY; downX = e.clientX; downY = e.clientY;
+    _spinVelY = 0; lastMoveT = performance.now();
+    canvas.setPointerCapture(e.pointerId);
+  });
   canvas.addEventListener('pointerup',   e => {
     _dragging = false; try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+    // Held still before releasing (no recent pointermove) → no momentum flick on release.
+    if (performance.now() - lastMoveT > 120) _spinVelY = 0;
     // A near-stationary press = a click → raycast-pick a node/tract (both view modes).
     if (Math.hypot(e.clientX - downX, e.clientY - downY) < 6) {
       if (_surgicalMode) _dropLesion(e.clientX, e.clientY);   // §3 drop a lesion sphere
@@ -976,18 +1023,20 @@ function _installInteraction() {
   });
   canvas.addEventListener('pointermove', e => {
     if (!_dragging || _cinematic) return;
-    _brainGroup.rotation.y += (e.clientX - px) * 0.008;
+    const dxRot = (e.clientX - px) * 0.008;
+    _brainGroup.rotation.y += dxRot;
     _brainGroup.rotation.x += (e.clientY - py) * 0.008;
     _brainGroup.rotation.x = Math.max(-1.3, Math.min(1.3, _brainGroup.rotation.x));
+    _spinVelY = dxRot;   // remember latest delta so release can decay into it (momentum flick)
+    lastMoveT = performance.now();
     px = e.clientX; py = e.clientY;
   });
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 0.9 : 1.1;   // scroll up → camera closer → zoom in
-    _camera.position.multiplyScalar(factor);
-    const d = _camera.position.length(), min = _meshHalf.length() * 1.1, max = _meshHalf.length() * 6;
-    if (d < min) _camera.position.setLength(min);
-    if (d > max) _camera.position.setLength(max);
+    const min = _meshHalf.length() * 1.1, max = _meshHalf.length() * 6;
+    const base = _camDistTarget ?? _camera.position.length();
+    _camDistTarget = Math.max(min, Math.min(max, base * factor));
   }, { passive: false });
 }
 
@@ -1082,6 +1131,7 @@ function _installInteraction() {
     // Frame the camera to fit the mesh.
     const dist = _meshHalf.length() / Math.tan(THREE.MathUtils.degToRad(_camera.fov / 2)) * 1.5;
     _camera.position.set(0, _meshHalf.y * 0.15, dist);
+    _camDistTarget = _camera.position.length();
     _camera.lookAt(_meshCenter);
     _applyOrientation(TOUR_DEFAULT[0], TOUR_DEFAULT[1]);
 
@@ -1245,12 +1295,14 @@ window.brain = {
   lesionCount() { return _lesions.length; },
 
   // ── §4D Longitudinal progression (0 = today … 1 = +5 yr) ───────────────────
+  // _progress eases toward _progressTarget once per frame in _loop() rather than
+  // snapping instantly, so dragging (or clicking) the timeline slider reads as a
+  // smooth aging transition instead of an abrupt jump-cut.
   setProgression(frac) {
-    _progress = Math.max(0, Math.min(1, Number(frac) || 0));
-    if (_shellMat) _shellMat.uniforms.uProgress.value = _progress;
-    return _progress;
+    _progressTarget = Math.max(0, Math.min(1, Number(frac) || 0));
+    return _progressTarget;
   },
-  getProgression() { return _progress; },
+  getProgression() { return _progressTarget; },
   /** Project a Z-score forward in time (deficits deepen with progression). */
   projectZ(z, frac) {
     const p = Math.max(0, Math.min(1, Number(frac ?? _progress) || 0));

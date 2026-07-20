@@ -15,9 +15,11 @@ function _normInv(p) {
 }
 
 // ── Practice round infrastructure ─────────────────────────────────────────────
-// Each supported test runs one unscored practice round on its first launch per session.
-const _practiceDone = { rsvp: false, nback: false, stroop: false, corsi: false };
+// Practice is optional and user-chosen from the pre-test intro screen (see
+// showTestIntro / showBatteryIntro below) rather than forced on first launch.
+const PRACTICE_SUPPORTED = { rsvp: true, nback: true, stroop: true, corsi: true };
 let _inPractice = false;
+let _batteryPracticePending = false;   // true while a practice round was launched from the battery intro
 
 const RSVP_PRACTICE_PASSAGE = {
   words:    ['The', 'cat', 'jumped', 'over', 'the', 'fence.'],
@@ -47,6 +49,7 @@ function _showPracticeResult(isCorrect) {
     : 'No problem — that was just practice. The real test starts now.';
   document.getElementById('brain-msg').textContent = '';
   document.getElementById('citation-block').classList.add('hidden');
+  document.getElementById('plain-explain').classList.add('hidden');
   document.getElementById('validity-warning').classList.add('hidden');
   document.getElementById('btn-reset').disabled = true;
   setTimeout(() => _finishPractice(key), 2200);
@@ -54,9 +57,13 @@ function _showPracticeResult(isCorrect) {
 
 function _finishPractice(key) {
   _inPractice = false;
-  _practiceDone[key] = true;
   _showPracticeBadge(false);
-  startTestByKey(key);   // now launches real test
+  if (_batteryPracticePending) {
+    _batteryPracticePending = false;
+    startBattery();       // practice was launched from the battery intro — continue into the battery
+    return;
+  }
+  startTestByKey(key);    // now launches real test
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -125,7 +132,6 @@ const NBACK_N           = 2;      // 2-Back
 const NBACK_LENGTH      = 30;     // continuous clinical stream (≥ 30 stimuli)
 const NBACK_LETTER_MS   = 1200;   // letter on-screen
 const NBACK_GAP_MS      = 300;    // blank inter-stimulus interval
-const NBACK_PASS_PCT    = 80;     // corrected-detection % for "strong" response
 const NBACK_ALPHABET    = 'BCDFGKLMNPRSTV'; // unambiguous consonants only
 
 // ── Adaptive difficulty state ──────────────────────────────────────────────────
@@ -133,12 +139,12 @@ const NBACK_ALPHABET    = 'BCDFGKLMNPRSTV'; // unambiguous consonants only
 // assessment.  These are mutated live by the test loops.
 let rsvpWordMs        = RSVP_WORD_MS;     // shrinks 22 ms per correct comprehension (floor 120)
 let nbackLetterMs     = NBACK_LETTER_MS;  // adapts within a run from running accuracy
-let stroopDeadlineMs  = 2200;             // per-trial response window, tightens with each correct
-let stroopDeadlineTimeout = null;         // handle for the shrinking response-deadline timer
+let stroopDeadlineTimeout = null;         // handle for the per-trial response-deadline timer
 
 // ── Screen registry ───────────────────────────────────────────────────────────
 const screens = {
   menu:     document.getElementById('screen-menu'),
+  intro:    document.getElementById('screen-intro'),
   rsvp:     document.getElementById('screen-rsvp'),
   question: document.getElementById('screen-question'),
   nback:    document.getElementById('screen-nback'),
@@ -429,10 +435,14 @@ function wait(ms) {
 // MAIN MENU
 // ═══════════════════════════════════════════════════════════════════════════════
 // ── Test dispatcher (shared by the menu buttons and the Full Clinical Battery) ─
-function startTestByKey(key) {
+// opts.practice: when true, runs the brief unscored practice round for the test
+// instead of the real scored test. Called from the intro screen buttons, from
+// _finishPractice() (to launch the real test right after practice), and from
+// the battery loop (always real tests, no practice).
+function startTestByKey(key, { practice = false } = {}) {
   currentTest = key;
-  // First launch of each supported test: run a brief unscored practice round.
-  if (!_inPractice && _practiceDone[key] === false) {
+
+  if (practice && PRACTICE_SUPPORTED[key]) {
     _inPractice = true;
     _showPracticeBadge(true);
     switch (key) {
@@ -453,10 +463,11 @@ function startTestByKey(key) {
         window.brain.activateRegion('corsiGame');
         _startCorsiPractice();
         return;
-      default:
-        _practiceDone[key] = true; _inPractice = false; _showPracticeBadge(false);
     }
   }
+
+  _inPractice = false;
+  _showPracticeBadge(false);
   switch (key) {
     case 'rsvp':
       rsvpPassage = RSVP_PASSAGES[Math.floor(Math.random() * RSVP_PASSAGES.length)];
@@ -474,6 +485,103 @@ function startTestByKey(key) {
   }
 }
 
+// ── Pre-test intro screen ─────────────────────────────────────────────────────
+// Shown whenever a test is picked from the menu, before any trial runs. Explains
+// what the test measures and what to do, then lets the patient choose to jump
+// straight into the real (scored) test or try an optional unscored practice round.
+const TEST_INTRO = {
+  rsvp: {
+    icon: '⚡', name: 'RSVP Reading', region: 'Language · Left Temporal (Wernicke’s / Broca’s)',
+    description: 'Words from a short sentence flash on screen one at a time, getting faster with each correct answer. Afterward you’ll answer one quick comprehension question about what you just read.',
+    expect: 'Just read — don’t say the words out loud. When the question appears, pick the answer you’re sure of as quickly as you can.',
+  },
+  nback: {
+    icon: '🔵', name: '2-Back Memory', region: 'Working Memory · Dorsolateral Prefrontal & Parietal Cortex',
+    description: 'A stream of letters appears one at a time. You press MATCH whenever the current letter is the same as the one shown two letters earlier.',
+    expect: 'Keep the last two letters in mind as new ones arrive. Press MATCH only on a true 2-back repeat — pressing too often or too rarely both count against you.',
+  },
+  stroop: {
+    icon: '🎨', name: 'Stroop Task', region: 'Executive Function / Response Conflict · Anterior Cingulate & Prefrontal Cortex',
+    description: 'A color word appears printed in an ink color that often doesn’t match the word itself. You select the INK COLOR, ignoring what the word says.',
+    expect: 'Read the color, not the word. Some trials are easy (word and ink match); others force you to override the automatic urge to read the word.',
+  },
+  corsi: {
+    icon: '🧩', name: 'Corsi Block-Tapping', region: 'Visuospatial Working Memory · Hippocampus',
+    description: 'A set of blocks lights up in sequence. You then tap the same blocks back in the same order — first forward, then in reverse.',
+    expect: 'Watch the flashing sequence closely, then reproduce it by tapping. Sequences get longer as you succeed.',
+  },
+  verbalFluency: {
+    icon: '🗣️', name: 'Verbal Fluency (FAS)', region: 'Lexical Retrieval / Strategic Search · Broca’s Area & Left Frontal Lobe',
+    description: 'You’ll get a letter (F, A, or S) and 60 seconds to type as many words as you can that start with it — no names or repeats.',
+    expect: 'Type a word and press Enter to submit it, then keep going. Quantity of valid words is what’s scored.',
+  },
+  aq10: {
+    icon: '🧠', name: 'AQ-10 Screener', region: 'NICE-Validated Screening Questionnaire · Amygdala–vmPFC Circuitry',
+    description: 'A 10-item questionnaire (Allison, Auyeung & Baron-Cohen, 2012) asking how much you agree with everyday statements about social and attentional style.',
+    expect: 'Answer honestly based on how you generally are, not how you’d like to be. This is a screening tool, not a diagnosis.',
+  },
+  fingerTapping: {
+    icon: '🤚', name: 'Finger Tapping', region: 'Motor Speed & Corticospinal Integrity · Precentral Gyrus / Supplementary Motor Area',
+    description: 'A simple, fast test of motor speed — tap as quickly as you can for a fixed window of time.',
+    expect: 'Tap the button (or Space bar) as fast and as steadily as possible for the full duration. No accuracy component — just raw speed.',
+  },
+  goNoGo: {
+    icon: '🚦', name: 'Go / No-Go', region: 'Response Inhibition · Right Inferior Frontal Gyrus & Pre-SMA',
+    description: 'Stimuli flash rapidly. You respond to most of them ("Go") but must hold back your response on the rare "No-Go" signal.',
+    expect: 'Respond fast on Go trials, but catch yourself and withhold on No-Go trials. Both false alarms and missed Go responses are scored.',
+  },
+  trailsB: {
+    icon: '🔗', name: 'Trail Making (TMT-B)', region: 'Set-Shifting / Cognitive Flexibility · Frontoparietal Network',
+    description: 'Numbers and letters are scattered on screen. You connect them in an alternating sequence (1-A-2-B-3-C…) as quickly as possible.',
+    expect: 'Alternate between number and letter each step — the timer keeps running through mistakes, so accuracy and speed both matter.',
+  },
+};
+
+let _introKey       = null;   // test key pending on the intro screen (null while the battery intro is shown)
+let _introIsBattery = false;
+
+function showTestIntro(key) {
+  const info = TEST_INTRO[key];
+  if (!info) { startTestByKey(key); return; }   // fallback safety for any unmapped key
+  _introKey       = key;
+  _introIsBattery = false;
+  document.getElementById('intro-icon').textContent        = info.icon;
+  document.getElementById('intro-title').textContent       = info.name;
+  document.getElementById('intro-region').textContent      = info.region;
+  document.getElementById('intro-desc').textContent        = info.description;
+  document.getElementById('intro-expect').textContent      = info.expect;
+  document.getElementById('btn-intro-start').textContent   = 'Start Test';
+  document.getElementById('btn-intro-practice').classList.toggle('hidden', !PRACTICE_SUPPORTED[key]);
+  showScreen('intro');
+}
+
+function showBatteryIntro() {
+  _introKey       = null;
+  _introIsBattery = true;
+  document.getElementById('intro-icon').textContent   = '◉';
+  document.getElementById('intro-title').textContent  = 'Full Clinical Battery';
+  document.getElementById('intro-region').textContent = 'All 6 core tests · ~12–15 minutes';
+  document.getElementById('intro-desc').textContent   =
+    'Runs the six core cognitive tests back-to-back (RSVP Reading, 2-Back Memory, Stroop, Corsi Block-Tapping, Verbal Fluency, and AQ-10), with a short rest/baseline pause between each one.';
+  document.getElementById('intro-expect').textContent =
+    'Find a quiet, uninterrupted stretch of time. Each test’s on-screen instructions appear right before it starts.';
+  document.getElementById('btn-intro-start').textContent = 'Start Full Battery';
+  document.getElementById('btn-intro-practice').classList.remove('hidden');
+  showScreen('intro');
+}
+
+document.getElementById('btn-intro-start').addEventListener('click', () => {
+  playClick();
+  if (_introIsBattery) startBattery();
+  else startTestByKey(_introKey, { practice: false });
+});
+document.getElementById('btn-intro-practice').addEventListener('click', () => {
+  playClick();
+  if (_introIsBattery) { _batteryPracticePending = true; startTestByKey('rsvp', { practice: true }); }
+  else startTestByKey(_introKey, { practice: true });
+});
+document.getElementById('btn-intro-quit').addEventListener('click', resetToMenu);
+
 const MENU_BTN = {
   'btn-start-rsvp': 'rsvp', 'btn-start-nback': 'nback', 'btn-start-stroop': 'stroop',
   'btn-start-corsi': 'corsi', 'btn-start-fluency': 'verbalFluency', 'btn-start-aq10': 'aq10',
@@ -481,11 +589,11 @@ const MENU_BTN = {
 };
 Object.entries(MENU_BTN).forEach(([id, key]) => {
   const el = document.getElementById(id);
-  if (el) el.addEventListener('click', () => { playClick(); startTestByKey(key); });
+  if (el) el.addEventListener('click', () => { playClick(); showTestIntro(key); });
 });
 
 // Full Clinical Battery — every test in sequence with 10 s rest/baseline periods.
-document.getElementById('btn-start-battery').addEventListener('click', () => { playClick(); startBattery(); });
+document.getElementById('btn-start-battery').addEventListener('click', () => { playClick(); showBatteryIntro(); });
 
 // ── Menu hover diagnostics ─────────────────────────────────────────────────────
 // Hovering a test card lights up that test's brain network in the live 3D render.
@@ -737,6 +845,7 @@ const rsvpBarEl   = document.getElementById('rsvp-bar');
 const rsvpCountEl = document.getElementById('rsvp-count');
 
 function runRSVP() {
+  rsvpWordMs = RSVP_WORD_MS;   // reset adaptive pace each run
   rsvpBarEl.style.width = '0%';
   rsvpWordEl.style.opacity = '';
   rsvpWordEl.classList.remove('pop');
@@ -1038,7 +1147,7 @@ function showNBackResult() {
   const farCorr = (fas  + 0.5) / (nonTargets + 1);
   const dprime  = parseFloat((_normInv(hrCorr) - _normInv(farCorr)).toFixed(2));
 
-  // Pass/fail at d′ ≥ 1.38 ≈ NBACK_PASS_PCT threshold mapped to new scale
+  // Pass/fail at d′ ≥ 1.38 (strong corrected-detection performance)
   const passThreshold = 1.38;
   window.brain.setRegionBrightness('nBackGame', dprime >= passThreshold ? 1.8 : 0.3);
 
@@ -1067,6 +1176,22 @@ const CITATIONS = {
   trailsB: 'Sánchez-Cubillo et al. (2009). Construct validity of the Trail Making Test. J Int Neuropsychol Soc, 15(3).',
 };
 
+// Plain-language explainer shown at the bottom of every result screen: what the
+// test measures, which brain pathway that maps to, and why performance on the
+// task reflects that pathway specifically. Kept separate from the (more
+// technical) brainMsg above so non-specialists can still follow the result.
+const PLAIN_EXPLANATION = {
+  rsvp: 'This test measures how well you understand written language while reading quickly. That skill depends mainly on the left temporal lobe (Wernicke’s area), which decodes word meaning, working with the frontal lobe (Broca’s area), which handles sentence structure. When comprehension breaks down under a fast reading pace, it usually shows up here first — which is why this task is a quick, sensitive way to screen the brain’s language network.',
+  nback: 'This test measures working memory — your ability to hold a few pieces of information in mind and update them moment to moment. That is mainly the job of the dorsolateral prefrontal cortex, supported by the parietal cortex. These regions act like a mental notepad, and this task stresses that system directly by making you track information that keeps changing.',
+  stroop: 'This test measures how well you can override an automatic response (reading the word) in favor of a conflicting one (naming the ink color). That control comes from the anterior cingulate cortex and prefrontal cortex, which act like a referee resolving competing signals. Slower or less accurate responses point to reduced efficiency in that conflict-resolution circuit.',
+  corsi: 'This test measures visuospatial working memory — remembering a sequence of locations in space. It relies heavily on the hippocampus, which is central to forming and briefly holding spatial memories, along with visual-processing areas at the back of the brain. It is a well-established way to probe hippocampal memory without using words at all.',
+  verbalFluency: 'This test measures how efficiently you can search your own vocabulary and retrieve words under a rule and a time limit. That process depends on the left frontal lobe, especially Broca’s area, which manages strategic word search and self-monitoring. Producing fewer words than expected usually reflects reduced frontal retrieval efficiency — not a smaller vocabulary.',
+  aq10: 'This is a screening questionnaire, not a performance test — it asks about lifelong social, communication, and attention-to-detail patterns associated with autism-spectrum traits. Research links these traits to differences in connectivity between the amygdala and the ventromedial prefrontal cortex, circuitry involved in social and emotional processing. A high score flags traits worth discussing with a clinician; it is not a diagnosis.',
+  fingerTapping: 'This test measures pure motor speed — how fast you can repeat a simple movement. It depends on the primary motor cortex (precentral gyrus) and the supplementary motor area, which plan and drive rapid, repetitive movement. Because it does not require thinking or decision-making, it is a clean way to check whether the brain’s motor output pathway is working normally.',
+  goNoGo: 'This test measures response inhibition — your ability to stop an action you have already started to make. That ability depends heavily on the right inferior frontal gyrus and a region called the pre-SMA, which act as the brain’s “brake pedal.” More false starts on No-Go trials suggest that braking circuit is working harder, or less effectively, to stop automatic responses.',
+  trailsB: 'This test measures cognitive flexibility — the ability to switch between two rules (numbers, then letters) without losing track. That kind of task-switching draws on a distributed frontoparietal network that coordinates attention and rule-switching. Taking longer, or needing more corrections, usually reflects reduced efficiency in that switching network rather than any trouble with numbers or letters themselves.',
+};
+
 // ── Normative Z-score finalizer ────────────────────────────────────────────────
 // Every test funnels its RAW clinical metric through here. We classify it against
 // the normative Mean/SD (or AQ-10 cut-off), derive a 0–100 normative-performance
@@ -1085,11 +1210,10 @@ function finalizeClinical(value, { resultMsg = '', brainMsg = '', lowEffort = nu
   if (currentTest == null) return;
 
   // Unscored practice round — show brief feedback then restart as real test.
+  // (Stroop and Corsi practice never reach here — they resolve via a monkey-patched
+  // result handler that calls _showPracticeResult() directly.)
   if (_inPractice) {
-    const isCorrect = currentTest === 'stroop'
-      ? value < (NORMATIVE.stroop?.mean ?? 200)   // lower interference = correct direction
-      : value > 0;
-    _showPracticeResult(isCorrect);
+    _showPracticeResult(value > 0);
     return;
   }
 
@@ -1105,9 +1229,15 @@ function finalizeClinical(value, { resultMsg = '', brainMsg = '', lowEffort = nu
   const c = classifyAdjusted(currentTest, value);
   const n = NORMATIVE[currentTest] || {};
 
+  // Cut-off tests (AQ-10) have no zc — displayScore must still follow the chart's
+  // "higher = better" convention, so a higherIsBetter:false raw score is inverted.
   let displayScore;
-  if (c.zc != null) displayScore = Math.max(0, Math.min(100, Math.round(50 + c.zc * 20)));
-  else              displayScore = Math.round((value / 10) * 100);
+  if (c.zc != null) {
+    displayScore = Math.max(0, Math.min(100, Math.round(50 + c.zc * 20)));
+  } else {
+    const pct = Math.round((value / 10) * 100);
+    displayScore = n.higherIsBetter === false ? 100 - pct : pct;
+  }
 
   let tag, tagColor, colorClass;
   if (c.status === 'deficit')           { tag = '✗ CLINICAL DEFICIT (z ≤ −1.5)';  tagColor = '#7a1a1a'; colorClass = 'poor'; }
@@ -1163,6 +1293,15 @@ function showResult(score, tag, tagColor, resultMsg, brainMsg, colorClass, clini
     citationBlock.classList.remove('hidden');
   } else {
     citationBlock.classList.add('hidden');
+  }
+
+  const plainExplainBlock = document.getElementById('plain-explain');
+  const plainExplain = PLAIN_EXPLANATION[currentTest];
+  if (plainExplain) {
+    document.getElementById('plain-explain-text').textContent = plainExplain;
+    plainExplainBlock.classList.remove('hidden');
+  } else {
+    plainExplainBlock.classList.add('hidden');
   }
 
   // Effort-validity indicator. Prefer an explicit per-test engagement signal
@@ -2441,7 +2580,7 @@ function finishCorsi() {
   // Clinical metric: mean of forward and backward spans (blocks).
   const value = Math.round(((fwd + bwd) / 2) * 10) / 10;
 
-  window.brain.setRegionBrightness('nBackGame', value >= NORMATIVE.corsi.mean ? 1.8 : 0.3);
+  window.brain.setRegionBrightness('corsiGame', value >= NORMATIVE.corsi.mean ? 1.8 : 0.3);
   if (value >= NORMATIVE.corsi.mean) {
     window.brain.triggerNeuroplasticity('leftHippocampus',  1.10, 1300);
     window.brain.triggerNeuroplasticity('rightHippocampus', 1.10, 1300);

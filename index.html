@@ -300,9 +300,8 @@
       font-size: 12px;
       font-weight: 600;
       color: var(--text-1);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      line-height: 1.25;
+      overflow-wrap: break-word;
     }
 
     .test-region {
@@ -892,6 +891,60 @@
       margin-bottom: 14px;
     }
 
+    /* ── Pre-test intro screen ── */
+    .intro-card {
+      padding: 14px;
+      background: var(--primary-soft);
+      border: 1px solid var(--primary-dim);
+      border-radius: var(--r-md);
+      margin-bottom: 14px;
+      text-align: center;
+    }
+    .intro-icon {
+      font-size: 26px;
+      margin-bottom: 6px;
+    }
+    .intro-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-1);
+      margin-bottom: 3px;
+    }
+    .intro-region {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--primary);
+      margin-bottom: 12px;
+    }
+    .intro-desc {
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--text-2);
+      text-align: left;
+      margin-bottom: 12px;
+    }
+    .intro-expect-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      text-align: left;
+      margin-bottom: 4px;
+    }
+    .intro-expect {
+      font-size: 11.5px;
+      line-height: 1.5;
+      color: var(--text-2);
+      text-align: left;
+    }
+    .intro-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    #btn-intro-practice.hidden { display: none; }
+
     /* ── Citation block ── */
     .citation-block {
       padding: 9px 12px;
@@ -917,6 +970,32 @@
       color: var(--text-2);
       line-height: 1.6;
       font-style: italic;
+    }
+
+    /* ── Plain-language result explainer ── */
+    .plain-explain {
+      padding: 10px 12px;
+      background: var(--border-faint);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      margin-bottom: 13px;
+    }
+    .plain-explain.hidden { display: none; }
+
+    .plain-explain-label {
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      margin-bottom: 5px;
+    }
+
+    #plain-explain-text {
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--text-2);
+      line-height: 1.6;
     }
 
     /* ═══════════════════════════════════════
@@ -1056,7 +1135,7 @@
       -webkit-backdrop-filter: var(--glass-blur);
       box-shadow: var(--shadow);
       z-index: 10;
-      max-width: 280px;
+      max-width: min(370px, calc(100vw - 32px));
     }
 
     #api-panel .api-title {
@@ -1073,7 +1152,8 @@
       font-size: 10px;
       line-height: 1.85;
       color: var(--text-3);
-      white-space: pre;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
 
     #api-panel .c  { color: var(--border); }
@@ -1822,6 +1902,7 @@
       font-size: 11px; color: #92400E; line-height: 1.5;
       margin: 8px 0;
     }
+    .validity-warning.hidden { display: none; }
     /* ── FTT touch button ───────────────────────── */
     .ftt-tap-btn {
       display: inline-block; background: var(--primary); color: #fff;
@@ -1949,9 +2030,13 @@
       margin-top: 16px; line-height: 1.5;
     }
 
-    /* ── Live Clinical Insight panel ── */
+    /* ── Live Clinical Insight panel ──
+       Anchored top-left (not bottom-left) so it never competes for the same
+       bottom band as the bottom-docked Digital Twin HUD panel, which can run
+       up to 900px wide and would otherwise sit on top of it. ── */
     #clinical-insight {
-      position: fixed; left: 24px; bottom: 24px; width: 360px; max-width: 42vw; z-index: 60;
+      position: fixed; left: 24px; top: 88px; width: 360px; max-width: 42vw; z-index: 60;
+      max-height: 38vh; overflow-y: auto;
       background: rgba(10,16,30,0.92); backdrop-filter: blur(8px);
       border: 1px solid rgba(120,160,230,0.30); border-radius: 14px;
       padding: 18px 20px; color: #dce8ff; box-shadow: 0 12px 40px rgba(0,0,0,0.45);
@@ -2242,6 +2327,23 @@
     <div id="legend"></div>
   </div>
 
+  <!-- ══ Screen: Pre-Test Intro (shared) ══ -->
+  <div id="screen-intro" class="screen hidden">
+    <button class="btn-quit" id="btn-intro-quit">✕&nbsp; Quit to Menu</button>
+    <div class="intro-card">
+      <div class="intro-icon" id="intro-icon">⚡</div>
+      <div class="intro-title" id="intro-title">Test Name</div>
+      <div class="intro-region" id="intro-region">Region · Pathway</div>
+      <div class="intro-desc" id="intro-desc"></div>
+      <div class="intro-expect-label">What to expect</div>
+      <div class="intro-expect" id="intro-expect"></div>
+    </div>
+    <div class="intro-actions">
+      <button id="btn-intro-start" class="btn-primary">Start Test</button>
+      <button id="btn-intro-practice" class="btn-secondary">Try a Practice First</button>
+    </div>
+  </div>
+
   <!-- ══ Screen: RSVP ══ -->
   <div id="screen-rsvp" class="screen hidden">
     <button class="btn-quit" id="btn-quit-rsvp">✕&nbsp; Quit to Menu</button>
@@ -2514,6 +2616,10 @@
     <div class="citation-block hidden" id="citation-block">
       <div class="citation-label">Peer-Reviewed Validation</div>
       <div id="citation-text"></div>
+    </div>
+    <div class="plain-explain hidden" id="plain-explain">
+      <div class="plain-explain-label">In Plain Terms — What This Result Means</div>
+      <div id="plain-explain-text"></div>
     </div>
     <button id="btn-reset" class="btn-secondary">↺&nbsp; Back to Menu</button>
   </div>
