@@ -94,6 +94,32 @@
 
     #panel.clinical-mode { width: 380px; }
 
+    /* FAB — hidden on desktop; the mobile media query below overrides
+       display:flex on top of this. Must stay ABOVE that media query so the
+       override actually wins the cascade (equal specificity → source order),
+       otherwise the button stays hidden at every viewport width. */
+    #mobile-fab {
+      display: none;
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 15;
+      align-items: center;
+      gap: 7px;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 28px;
+      padding: 11px 20px;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: inherit;
+      letter-spacing: -0.01em;
+      box-shadow: 0 4px 20px rgba(37,99,235,.45);
+      cursor: pointer;
+    }
+
     /* ═══════════════════════════════════════
        MOBILE LAYOUT  (≤ 640 px)
     ═══════════════════════════════════════ */
@@ -137,29 +163,6 @@
       #mobile-backdrop {
         display: block;
       }
-    }
-
-    /* FAB — hidden on desktop */
-    #mobile-fab {
-      display: none;
-      position: fixed;
-      bottom: 24px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 15;
-      align-items: center;
-      gap: 7px;
-      background: var(--primary);
-      color: #fff;
-      border: none;
-      border-radius: 28px;
-      padding: 11px 20px;
-      font-size: 13px;
-      font-weight: 600;
-      font-family: inherit;
-      letter-spacing: -0.01em;
-      box-shadow: 0 4px 20px rgba(37,99,235,.45);
-      cursor: pointer;
     }
 
     /* Backdrop behind the open sheet */
