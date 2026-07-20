@@ -1,0 +1,22 @@
+{
+  "format": "aal-region-density",
+  "note": "Optional structural-density map for Anatomical Scan mode. density = 1 - fractional grey-matter loss (1.0 = healthy). Values are calibrated to published cross-sectional atrophy: medial-temporal loss reaches ~20-25% in impairment, temporal/parietal ~10-15%, cingulate ~5-8% — NOT exaggerated. Diffused over the surface with a Gaussian; unlisted regions default to 1.0. Delete this file for a plain greyscale scan, or supply a flat per-vertex array (length == mesh vertex count) for vertex-level data.",
+  "regions": {
+    "37": 0.76,
+    "38": 0.79,
+    "39": 0.83,
+    "40": 0.85,
+    "41": 0.80,
+    "42": 0.83,
+    "81": 0.88,
+    "82": 0.90,
+    "85": 0.87,
+    "86": 0.89,
+    "89": 0.85,
+    "90": 0.87,
+    "59": 0.91,
+    "60": 0.92,
+    "31": 0.93,
+    "32": 0.94
+  }
+}

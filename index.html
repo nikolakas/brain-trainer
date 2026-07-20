@@ -1,0 +1,2925 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Brain Trainer</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    /* file:// guard — ES modules silently break under file:// in Chrome */
+    if (location.protocol === 'file:') {
+      document.addEventListener('DOMContentLoaded', () => {
+        document.body.innerHTML = `
+          <div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+            background:#F1F5F9;font-family:Inter,system-ui,sans-serif;">
+            <div style="background:#fff;padding:40px 48px;border-radius:16px;max-width:480px;
+              box-shadow:0 8px 32px rgba(0,0,0,0.10);text-align:center;">
+              <div style="font-size:40px;margin-bottom:16px;">🧠</div>
+              <h2 style="font-size:18px;font-weight:700;color:#0F172A;margin:0 0 10px;">Serve over HTTP</h2>
+              <p style="font-size:13px;color:#475569;line-height:1.6;margin:0 0 24px;">
+                Brain Trainer uses ES modules which browsers block over
+                <code style="background:#F1F5F9;padding:2px 6px;border-radius:4px;font-size:12px;">file://</code>.
+                Run a local server instead:
+              </p>
+              <pre style="background:#0F172A;color:#7DD3FC;padding:16px;border-radius:10px;
+                font-size:12px;text-align:left;margin:0;">python -m http.server 8765
+# then open http://localhost:8765</pre>
+            </div>
+          </div>`;
+      });
+    }
+  </script>
+  <style>
+    /* ── Design tokens ─────────────────────────────────────────────────────── */
+    :root {
+      /* ── Dark frosted-glass theme (holographic clinical) ──────────────────── */
+      --bg:           #060a12;
+      --surface:      rgba(15, 23, 42, 0.60);   /* frosted glass panel fill */
+      --surface-solid:#0e1626;                  /* opaque fallback where blur can't stack */
+      --border:       rgba(255, 255, 255, 0.10);
+      --border-faint: rgba(255, 255, 255, 0.06);
+      --primary:      #3B82F6;
+      --primary-soft: rgba(59, 130, 246, 0.14);
+      --primary-dim:  rgba(59, 130, 246, 0.34);
+      --text-1:       #EAF2FF;                   /* bright white */
+      --text-2:       #9FC0E8;                   /* cool icy blue */
+      --text-3:       #6B84A8;                   /* dim icy */
+      --green:        #34D399;
+      --red:          #FF6B5A;
+      --amber:        #FBBF24;
+      --purple:       #C084FC;
+      --teal:         #2DD4BF;
+      --glass-blur:   blur(12px);
+      --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-xl: 18px;
+      --shadow: 0 2px 10px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.30);
+      --shadow-lg: 0 12px 40px rgba(0,0,0,.50), 0 2px 8px rgba(0,0,0,.35);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1424;   /* matches NiiVue backColor so there's no flash on load */
+      overflow: hidden;
+      font-family: 'Inter', system-ui, sans-serif;
+      color: var(--text-1);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    #canvas-container { position: fixed; inset: 0; }
+
+    /* ═══════════════════════════════════════
+       LEFT PANEL — desktop
+    ═══════════════════════════════════════ */
+    #panel {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      width: 268px;
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
+      overflow-x: hidden;
+      background: var(--surface);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border-radius: var(--r-xl);
+      box-shadow: var(--shadow-lg);
+      border: 1px solid var(--border);
+      z-index: 10;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+      transition: transform 0.3s cubic-bezier(.4,0,.2,1);
+    }
+
+    #panel.clinical-mode { width: 380px; }
+
+    /* ═══════════════════════════════════════
+       MOBILE LAYOUT  (≤ 640 px)
+    ═══════════════════════════════════════ */
+    @media (max-width: 640px) {
+      /* Panel slides up from bottom as a sheet */
+      #panel {
+        top: auto;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        max-height: 85vh;
+        border-radius: var(--r-xl) var(--r-xl) 0 0;
+        transform: translateY(100%);
+        border-bottom: none;
+        /* clear iPhone home bar */
+        padding-bottom: env(safe-area-inset-bottom, 16px);
+      }
+      #panel.mobile-open {
+        transform: translateY(0);
+      }
+      /* Drag handle at top of sheet */
+      #panel-header::before {
+        content: '';
+        display: block;
+        width: 36px;
+        height: 4px;
+        background: var(--border);
+        border-radius: 2px;
+        margin: 0 auto 10px;
+      }
+      /* Floating brain button */
+      #mobile-fab {
+        display: flex;
+      }
+      /* Hide API console on mobile */
+      #api-panel { display: none !important; }
+      /* Hint text on mobile */
+      #hint { display: none; }
+      /* Backdrop */
+      #mobile-backdrop {
+        display: block;
+      }
+    }
+
+    /* FAB — hidden on desktop */
+    #mobile-fab {
+      display: none;
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 15;
+      align-items: center;
+      gap: 7px;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 28px;
+      padding: 11px 20px;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: inherit;
+      letter-spacing: -0.01em;
+      box-shadow: 0 4px 20px rgba(37,99,235,.45);
+      cursor: pointer;
+    }
+
+    /* Backdrop behind the open sheet */
+    #mobile-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.45);
+      z-index: 9;
+      backdrop-filter: blur(2px);
+    }
+
+    /* ── Header ─────────────────────────── */
+    #panel-header {
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid var(--border-faint);
+      background: rgba(10, 16, 30, 0.72);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .panel-logo {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .panel-logo-icon {
+      width: 30px;
+      height: 30px;
+      border-radius: var(--r-sm);
+      background: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      flex-shrink: 0;
+    }
+
+    .panel-logo-text h1 {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-1);
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }
+
+    .panel-logo-text .tagline {
+      font-size: 9px;
+      font-weight: 500;
+      color: var(--text-3);
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+    }
+
+    /* ── Shared screen chrome ───────────── */
+    .screen {
+      padding: 14px 16px 18px;
+      animation: screenIn 0.18s ease;
+    }
+
+    .screen.hidden { display: none; }
+
+    @keyframes screenIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .screen-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      margin-bottom: 12px;
+    }
+
+    /* ── Quit button ── */
+    .btn-quit {
+      display: block;
+      width: 100%;
+      padding: 6px 0;
+      margin-bottom: 10px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--r-sm);
+      font-size: 10px;
+      font-family: inherit;
+      color: var(--text-3);
+      cursor: pointer;
+      letter-spacing: 0.03em;
+      transition: background 0.12s, color 0.12s;
+    }
+    .btn-quit:hover { background: var(--border-faint); color: var(--text-2); }
+
+    /* ── Compact test rows (replaces verbose cards) ─────── */
+    .test-section-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      padding: 10px 16px 6px;
+      margin: 0 -16px;
+    }
+
+    .test-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: var(--r-md);
+      margin-bottom: 3px;
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    .test-row:hover { background: var(--primary-soft); }
+
+    .test-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--r-sm);
+      background: var(--primary-soft);
+      border: 1px solid var(--primary-dim);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      flex-shrink: 0;
+    }
+
+    .test-info { flex: 1; min-width: 0; }
+
+    .test-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-1);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .test-region {
+      font-size: 9.5px;
+      font-weight: 500;
+      color: var(--text-3);
+      line-height: 1.3;
+    }
+
+    .test-start-btn {
+      flex-shrink: 0;
+      padding: 5px 11px;
+      background: var(--primary);
+      border: none;
+      border-radius: var(--r-sm);
+      color: #fff;
+      font-size: 10.5px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.12s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .test-start-btn:hover  { background: #1D4ED8; }
+    .test-start-btn:active { transform: scale(0.96); }
+
+    .test-start-btn.purple { background: var(--purple); }
+    .test-start-btn.purple:hover { background: #6D28D9; }
+    .test-start-btn.teal   { background: var(--teal); }
+    .test-start-btn.teal:hover { background: #0F766E; }
+    .test-start-btn.amber  { background: var(--amber); }
+    .test-start-btn.amber:hover { background: #B45309; }
+    .test-start-btn.green  { background: var(--green); }
+    .test-start-btn.green:hover { background: #047857; }
+    .test-start-btn.navy   { background: #1e3a5f; }
+    .test-start-btn.navy:hover { background: #162a44; }
+
+    /* kept for legacy game screens that still use these classes */
+    .test-card { display: none; } /* hide old card elements if any remain */
+
+    /* ── Buttons ────────────────────────── */
+    .btn-primary {
+      width: 100%;
+      padding: 9px 0;
+      background: var(--primary);
+      border: none;
+      border-radius: var(--r-md);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.12s, transform 0.1s;
+    }
+    .btn-primary:hover  { background: #1D4ED8; }
+    .btn-primary:active { transform: scale(0.98); }
+
+    .btn-purple { background: var(--purple); }
+    .btn-purple:hover { background: #6D28D9; }
+
+    .btn-teal { background: var(--teal); }
+    .btn-teal:hover { background: #0F766E; }
+
+    .btn-secondary {
+      width: 100%;
+      padding: 9px 0;
+      background: var(--border-faint);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.12s, transform 0.1s;
+    }
+    .btn-secondary:hover  { background: var(--primary-soft); }
+    .btn-secondary:active { transform: scale(0.98); }
+
+    /* ── Legend ─────────────────────────── */
+    .legend-divider {
+      border: none;
+      border-top: 1px solid var(--border-faint);
+      margin: 8px 0 10px;
+    }
+
+    .legend-heading {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      margin-bottom: 6px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 3px 5px;
+      border-radius: var(--r-sm);
+      cursor: pointer;
+      font-size: 10.5px;
+      font-weight: 500;
+      color: var(--text-2);
+      transition: background 0.12s, color 0.12s;
+      user-select: none;
+    }
+    .legend-item:hover { background: var(--primary-soft); color: var(--primary); }
+
+    .swatch {
+      width: 9px;
+      height: 9px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    /* ═══════════════════════════════════════
+       SCREEN: RSVP
+    ═══════════════════════════════════════ */
+    .rsvp-stage {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100px;
+      margin: 6px 0 12px;
+      background: var(--border-faint);
+      border-radius: var(--r-lg);
+      border: 1px solid var(--border);
+    }
+
+    #rsvp-word {
+      font-size: 38px;
+      font-weight: 800;
+      color: var(--text-1);
+      text-align: center;
+      letter-spacing: -0.02em;
+      line-height: 1;
+      opacity: 0;
+    }
+
+    #rsvp-word.pop {
+      animation: wordPop 0.29s ease-in-out forwards;
+    }
+
+    @keyframes wordPop {
+      0%   { opacity: 0; transform: scale(0.88) translateY(6px); }
+      14%  { opacity: 1; transform: scale(1) translateY(0); }
+      78%  { opacity: 1; transform: scale(1) translateY(0); }
+      100% { opacity: 0; transform: scale(1.06) translateY(-5px); }
+    }
+
+    .rsvp-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    #rsvp-count, .rsvp-speed {
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-3);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .progress-track {
+      height: 3px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    #rsvp-bar {
+      height: 100%;
+      width: 0%;
+      background: var(--primary);
+      border-radius: 3px;
+      transition: width 0.28s ease;
+    }
+
+    /* ═══════════════════════════════════════
+       SCREEN: QUESTION
+    ═══════════════════════════════════════ */
+    .question-text {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-1);
+      margin-bottom: 14px;
+      line-height: 1.4;
+      letter-spacing: -0.01em;
+    }
+
+    .timer-row {
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+      margin-bottom: 14px;
+    }
+
+    .timer-label { font-size: 9px; font-weight: 700; color: var(--text-3); letter-spacing: 0.10em; text-transform: uppercase; }
+    .timer-unit  { font-size: 10px; font-weight: 500; color: var(--text-3); }
+
+    #timer-val {
+      font-size: 30px;
+      font-weight: 800;
+      color: var(--green);
+      font-variant-numeric: tabular-nums;
+      transition: color 0.4s;
+      line-height: 1;
+      letter-spacing: -0.02em;
+    }
+
+    .choices { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+
+    .choice-btn {
+      width: 100%;
+      padding: 9px 12px;
+      background: var(--border-faint);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      color: var(--text-2);
+      font-size: 12px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      text-align: left;
+      transition: background 0.12s, border-color 0.12s, transform 0.1s;
+    }
+
+    .choice-btn:not(:disabled):hover { background: var(--primary-soft); border-color: var(--primary-dim); color: var(--primary); }
+    .choice-btn:not(:disabled):active { transform: scale(0.98); }
+    .choice-btn:disabled { cursor: default; }
+
+    .choice-btn.btn-correct { background: rgba(5,150,105,.08); border-color: rgba(5,150,105,.40); color: #065f46; }
+    .choice-btn.btn-wrong   { background: rgba(220,38,38,.06); border-color: rgba(220,38,38,.35); color: #991b1b; }
+
+    .answer-hint { font-size: 10px; font-weight: 500; color: var(--text-3); text-align: center; }
+
+    /* ═══════════════════════════════════════
+       SCREEN: N-BACK
+    ═══════════════════════════════════════ */
+    .nback-stage {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 108px;
+      margin: 4px 0 8px;
+    }
+
+    .nback-box {
+      width: 100px;
+      height: 100px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--r-lg);
+      background: var(--border-faint);
+      border: 1.5px solid var(--border);
+      transition: background 0.15s, border-color 0.15s, box-shadow 0.2s;
+    }
+
+    .nback-box.lit {
+      background: var(--primary-soft);
+      border-color: var(--primary);
+      box-shadow: 0 0 0 4px rgba(37,99,235,.10), 0 6px 24px rgba(37,99,235,.20);
+    }
+
+    #nback-letter {
+      font-size: 62px;
+      font-weight: 800;
+      color: var(--text-1);
+      letter-spacing: -0.03em;
+      line-height: 1;
+      min-width: 1ch;
+      text-align: center;
+      transition: color 0.15s;
+    }
+
+    .nback-box.lit #nback-letter { color: var(--primary); }
+
+    .nback-cue {
+      font-size: 10.5px;
+      font-weight: 500;
+      color: var(--text-3);
+      text-align: center;
+      margin-bottom: 9px;
+      line-height: 1.5;
+    }
+    .nback-cue strong { color: var(--text-2); font-weight: 600; }
+
+    /* MATCH button */
+    .btn-match {
+      display: block;
+      width: 100%;
+      padding: 12px 0;
+      font-size: 13px;
+      font-weight: 700;
+      font-family: inherit;
+      border-radius: var(--r-md);
+      letter-spacing: 0.06em;
+      margin: 0 0 12px;
+      cursor: default;
+      transition: all 0.14s;
+      background: var(--border-faint);
+      border: 1.5px solid var(--border);
+      color: var(--text-3);
+    }
+
+    .btn-match.active {
+      cursor: pointer;
+      background: var(--green);
+      border-color: transparent;
+      color: #fff;
+      box-shadow: 0 4px 16px rgba(5,150,105,.35);
+    }
+    .btn-match.active:hover  { opacity: 0.9; }
+    .btn-match.active:active { transform: scale(0.97); }
+
+    .btn-match.flash-hit { background: var(--green) !important; border-color: transparent !important; color: #fff !important; }
+    .btn-match.flash-fa  { background: var(--red)   !important; border-color: transparent !important; color: #fff !important; }
+
+    /* Trail dots */
+    .nback-trail { display: flex; justify-content: center; gap: 4px; margin-bottom: 10px; }
+
+    .trail-dot {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--border-faint);
+      border: 1.5px solid var(--border);
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+    .trail-dot.active { border-color: var(--primary); background: var(--primary-soft); transform: scale(1.22); }
+    .trail-dot.dot-na      { background: var(--border-faint); border-color: var(--border); }
+    .trail-dot.dot-correct { background: rgba(5,150,105,.12);  border-color: rgba(5,150,105,.45); }
+    .trail-dot.dot-miss    { background: rgba(217,119,6,.12);  border-color: rgba(217,119,6,.45); }
+    .trail-dot.dot-fa      { background: rgba(220,38,38,.12);  border-color: rgba(220,38,38,.45); }
+
+    /* Live stats */
+    .nback-live-stats { display: flex; gap: 5px; }
+
+    .live-stat {
+      flex: 1;
+      text-align: center;
+      padding: 7px 4px 8px;
+      background: var(--border-faint);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+    }
+
+    .live-stat-val {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--primary);
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+    }
+
+    .live-stat-label {
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      margin-top: 2px;
+    }
+
+    /* ═══════════════════════════════════════
+       SCREEN: STROOP TASK
+    ═══════════════════════════════════════ */
+    .stroop-display {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 116px;
+      margin: 4px 0 8px;
+      background: var(--border-faint);
+      border-radius: var(--r-lg);
+      border: 1px solid var(--border);
+    }
+
+    #stroop-word {
+      font-size: 48px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1;
+      min-width: 1ch;
+      text-align: center;
+    }
+
+    .stroop-cue {
+      font-size: 10.5px;
+      font-weight: 500;
+      color: var(--text-3);
+      text-align: center;
+      margin-bottom: 10px;
+      line-height: 1.5;
+    }
+    .stroop-cue strong { color: var(--text-2); font-weight: 600; }
+
+    .stroop-choices {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .stroop-btn:last-child:nth-child(odd) { grid-column: 1 / -1; }
+
+    .stroop-btn {
+      padding: 10px 0;
+      border-radius: var(--r-md);
+      font-size: 10.5px;
+      font-weight: 700;
+      font-family: inherit;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      cursor: pointer;
+      border: 1.5px solid transparent;
+      background: var(--border-faint);
+      transition: filter 0.12s, transform 0.1s;
+    }
+
+    .stroop-btn[data-color="red"]    { border-color: rgba(220,38,38,.25);  color: #DC2626; }
+    .stroop-btn[data-color="blue"]   { border-color: rgba(37,99,235,.25);  color: #2563EB; }
+    .stroop-btn[data-color="green"]  { border-color: rgba(5,150,105,.25);  color: #059669; }
+    .stroop-btn[data-color="yellow"] { border-color: rgba(217,119,6,.25);  color: #D97706; }
+    .stroop-btn[data-color="purple"] { border-color: rgba(124,58,237,.25); color: #7C3AED; }
+
+    .stroop-btn:not(:disabled):hover  { filter: brightness(1.08); transform: translateY(-1px); }
+    .stroop-btn:not(:disabled):active { transform: scale(0.97); }
+    .stroop-btn:disabled { cursor: default; }
+    .stroop-btn.btn-correct { box-shadow: 0 0 0 2px currentColor; }
+    .stroop-btn.btn-wrong   { opacity: 0.22; }
+
+    .stroop-feedback {
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      min-height: 17px;
+      margin-bottom: 8px;
+    }
+
+    .stroop-progress {
+      height: 3px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+
+    #stroop-bar {
+      height: 100%;
+      width: 0%;
+      background: var(--purple);
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+
+    /* ═══════════════════════════════════════
+       SCREEN: CORSI BLOCK-TAPPING
+    ═══════════════════════════════════════ */
+    .corsi-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10.5px;
+      color: var(--text-2);
+      margin: 4px 0 8px;
+    }
+    .corsi-meta strong { color: var(--primary); font-variant-numeric: tabular-nums; }
+
+    .corsi-board {
+      position: relative;
+      width: 100%;
+      height: 220px;
+      background: var(--border-faint);
+      border: 1.5px solid var(--border);
+      border-radius: var(--r-lg);
+      margin-bottom: 8px;
+      overflow: hidden;
+      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+    }
+    .corsi-board.recall-mode {
+      border-color: var(--primary);
+      background: var(--primary-soft);
+      box-shadow: 0 0 0 3px rgba(37,99,235,.08);
+    }
+
+    .corsi-block {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      border-radius: var(--r-md);
+      background: #c7d9f8;
+      border: 1.5px solid #9bbcf0;
+      cursor: pointer;
+      transform: translate(-50%, -50%);
+      transition: background 0.12s, box-shadow 0.16s, transform 0.1s;
+    }
+    .recall-mode .corsi-block:hover { transform: translate(-50%, -50%) scale(1.07); }
+    .corsi-block:active { transform: translate(-50%, -50%) scale(0.94); }
+
+    .corsi-block.corsi-lit {
+      background: var(--primary);
+      border-color: #1D4ED8;
+      box-shadow: 0 0 0 4px rgba(37,99,235,.16), 0 6px 20px rgba(37,99,235,.40);
+    }
+    .corsi-block.corsi-tap {
+      background: var(--green);
+      border-color: #047857;
+      box-shadow: 0 0 0 4px rgba(5,150,105,.16), 0 6px 18px rgba(5,150,105,.38);
+    }
+    .corsi-block.corsi-wrong {
+      background: var(--red);
+      border-color: #B91C1C;
+      box-shadow: 0 0 0 4px rgba(220,38,38,.16), 0 6px 18px rgba(220,38,38,.38);
+    }
+
+    .corsi-hint {
+      text-align: center;
+      font-size: 10.5px;
+      font-weight: 500;
+      color: var(--text-3);
+      min-height: 15px;
+      margin-bottom: 10px;
+    }
+
+    .btn-amber { background: var(--amber); }
+    .btn-amber:hover { background: #B45309; }
+
+    /* ═══════════════════════════════════════
+       SCREEN: RESULT
+    ═══════════════════════════════════════ */
+    .score-wrap { text-align: center; margin: 10px 0 14px; }
+
+    #score-num {
+      font-size: 68px;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -0.04em;
+      opacity: 0;
+    }
+
+    #score-num.reveal {
+      animation: scoreReveal 0.44s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+
+    @keyframes scoreReveal {
+      0%   { opacity: 0; transform: scale(0.4); }
+      65%  { transform: scale(1.10); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+
+    #score-num.perfect { color: var(--amber); }
+    #score-num.good    { color: var(--green); }
+    #score-num.poor    { color: var(--red); }
+
+    #score-tag {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-top: 5px;
+      color: var(--text-3);
+    }
+
+    #result-msg {
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text-2);
+      margin-bottom: 9px;
+      line-height: 1.52;
+      text-align: center;
+    }
+
+    #brain-msg {
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--text-2);
+      line-height: 1.6;
+      padding: 11px 13px;
+      background: var(--border-faint);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      margin-bottom: 14px;
+    }
+
+    /* ── Citation block ── */
+    .citation-block {
+      padding: 9px 12px;
+      background: var(--primary-soft);
+      border: 1px solid var(--primary-dim);
+      border-radius: var(--r-md);
+      margin-bottom: 13px;
+    }
+    .citation-block.hidden { display: none; }
+
+    .citation-label {
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+      color: var(--primary);
+      margin-bottom: 5px;
+    }
+
+    #citation-text {
+      font-size: 10px;
+      font-weight: 400;
+      color: var(--text-2);
+      line-height: 1.6;
+      font-style: italic;
+    }
+
+    /* ═══════════════════════════════════════
+       TIMELINE DASHBOARD OVERLAY
+    ═══════════════════════════════════════ */
+    #dashboard-panel {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15,23,42,.18);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    #dashboard-panel.hidden { display: none; }
+
+    #dashboard-inner {
+      width: min(700px, calc(100vw - 48px));
+      max-height: calc(100vh - 60px);
+      overflow-y: auto;
+      background: rgba(15, 23, 42, 0.78);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-radius: var(--r-xl);
+      box-shadow: var(--shadow-lg);
+      border: 1px solid var(--border);
+      padding: 24px 28px 20px;
+    }
+
+    .dashboard-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .dashboard-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-1);
+      letter-spacing: -0.01em;
+      margin-bottom: 2px;
+    }
+
+    .dashboard-subtitle { font-size: 10.5px; color: var(--text-2); }
+
+    #btn-close-dashboard {
+      flex-shrink: 0;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--border-faint);
+      color: var(--text-2);
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.12s, color 0.12s;
+    }
+    #btn-close-dashboard:hover { background: var(--border); color: var(--text-1); }
+
+    .chart-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      margin-bottom: 10px;
+    }
+    .chart-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      color: var(--text-2);
+      font-family: 'Inter', sans-serif;
+    }
+    .legend-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .legend-dash {
+      display: inline-block;
+      width: 14px;
+      height: 2px;
+      border-top: 2px dashed #D97706;
+      vertical-align: middle;
+      margin-right: 2px;
+    }
+
+    .chart-empty {
+      text-align: center;
+      padding: 48px 0 40px;
+      font-size: 12px;
+      color: var(--text-3);
+      font-family: 'Inter', sans-serif;
+    }
+
+    .clinical-status {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-radius: var(--r-lg);
+      margin-top: 12px;
+    }
+    .clinical-status.status-positive { background: rgba(52,211,153,.08); border: 1px solid rgba(52,211,153,.30); }
+    .clinical-status.status-neutral  { background: rgba(90,180,255,.07);  border: 1px solid rgba(90,180,255,.28); }
+    .clinical-status.status-negative { background: rgba(255,107,90,.07);  border: 1px solid rgba(255,107,90,.28); }
+    .status-indicator { font-size: 22px; line-height: 1; flex-shrink: 0; }
+    .status-positive .status-indicator { color: var(--green); }
+    .status-neutral  .status-indicator { color: #6db4ff; }
+    .status-negative .status-indicator { color: var(--red); }
+    .status-text { flex: 1; }
+    .status-label { font-size: 8px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); margin-bottom: 2px; }
+    .status-value { font-size: 12px; font-weight: 600; line-height: 1.3; }
+    .status-positive .status-value { color: #6ee7b7; }
+    .status-neutral  .status-value { color: #a9d0ff; }
+    .status-negative .status-value { color: #ff9d8f; }
+    .status-trend { font-size: 10px; color: var(--text-2); margin-top: 2px; }
+
+    .btn-timeline { margin-top: 6px; color: var(--primary); border-color: var(--primary-dim); }
+    .btn-timeline:hover { background: var(--primary-soft); }
+
+    /* ═══════════════════════════════════════
+       RIGHT PANEL — API cheatsheet
+    ═══════════════════════════════════════ */
+    #api-panel {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-xl);
+      padding: 13px 15px;
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      box-shadow: var(--shadow);
+      z-index: 10;
+      max-width: 280px;
+    }
+
+    #api-panel .api-title {
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--text-3);
+      margin-bottom: 7px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    #api-panel pre {
+      font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+      font-size: 10px;
+      line-height: 1.85;
+      color: var(--text-3);
+      white-space: pre;
+    }
+
+    #api-panel .c  { color: var(--border); }
+    #api-panel .fn { color: var(--primary); }
+    #api-panel .s  { color: var(--green); }
+    #api-panel .n  { color: var(--amber); }
+
+    /* ═══════════════════════════════════════
+       DIGITAL BRAIN TWIN HUD
+    ═══════════════════════════════════════ */
+    #digital-twin-hud {
+      position: fixed;
+      inset: 0;
+      z-index: 300;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      padding: 20px;
+    }
+
+    #digital-twin-hud.hidden { display: none; }
+
+    #dth-panel {
+      pointer-events: all;
+      width: min(900px, calc(100vw - 40px));
+      max-height: 44vh;
+      overflow-y: auto;
+      background: rgba(4, 9, 26, 0.92);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-radius: 18px;
+      border: 1px solid rgba(70, 150, 255, 0.22);
+      box-shadow:
+        0 0 80px rgba(20, 70, 200, 0.20),
+        0 8px 40px rgba(0, 0, 0, 0.55);
+      padding: 16px 20px 18px;
+      color: #ddeeff;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(70, 130, 255, 0.25) transparent;
+    }
+
+    .dth-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid rgba(70, 150, 255, 0.12);
+      padding-bottom: 10px;
+    }
+
+    .dth-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #88bbff;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+
+    .dth-subtitle {
+      font-size: 10px;
+      color: rgba(160, 200, 255, 0.50);
+    }
+
+    #btn-exit-twin {
+      flex-shrink: 0;
+      background: rgba(60, 110, 255, 0.14);
+      border: 1px solid rgba(70, 130, 255, 0.28);
+      border-radius: 8px;
+      color: #88aaff;
+      font-size: 11px;
+      font-family: inherit;
+      padding: 5px 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.14s;
+    }
+    #btn-exit-twin:hover { background: rgba(70, 130, 255, 0.26); color: #aaccff; }
+
+    /* Radar (left) + tract cards (right) */
+    .dth-body {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .dth-radar {
+      flex: 0 0 268px;
+      position: sticky;
+      top: 0;
+      align-self: flex-start;
+    }
+    .dth-radar svg { width: 100%; height: auto; display: block; }
+    .dth-radar-empty {
+      font-size: 10px; color: rgba(160,200,255,0.55); line-height: 1.6;
+      border: 1px dashed rgba(90,160,255,0.28); border-radius: 12px;
+      padding: 22px 16px; text-align: center;
+    }
+    @media (max-width: 720px) {
+      .dth-body { flex-direction: column; }
+      .dth-radar { flex-basis: auto; width: 100%; max-width: 320px; margin: 0 auto; position: static; }
+    }
+
+    .dth-tracts {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      gap: 9px;
+    }
+
+    .dth-tract-card {
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid rgba(70, 150, 255, 0.10);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+
+    .dth-tract-card.status-deficit   { border-color: rgba(255, 90, 70, 0.28); }
+    .dth-tract-card.status-normal    { border-color: rgba(60, 220, 140, 0.22); }
+    .dth-tract-card.status-reference { border-color: rgba(70, 210, 180, 0.20); }
+    .dth-tract-card.status-untested  { border-color: rgba(150, 165, 195, 0.20); opacity: 0.62; }
+
+    .dth-tract-name {
+      font-size: 11px;
+      font-weight: 700;
+      color: #99ccff;
+      margin-bottom: 3px;
+      letter-spacing: 0.03em;
+    }
+
+    .dth-test-label {
+      font-size: 9.5px;
+      color: rgba(170, 200, 255, 0.50);
+      margin-bottom: 6px;
+    }
+
+    .dth-badge {
+      display: inline-block;
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      padding: 2px 7px;
+      border-radius: 4px;
+      margin-bottom: 6px;
+    }
+    .dth-badge.deficit   { background: rgba(255, 75, 55, 0.18); color: #ff8870; }
+    .dth-badge.normal    { background: rgba(55, 220, 140, 0.18); color: #44ee99; }
+    .dth-badge.reference { background: rgba(70, 210, 180, 0.14); color: #55ddcc; }
+    .dth-badge.untested  { background: rgba(150, 165, 195, 0.16); color: #aab6cf; letter-spacing: 0.04em; }
+
+    .dth-note {
+      font-size: 9.5px;
+      color: rgba(200, 220, 255, 0.68);
+      line-height: 1.56;
+      margin-bottom: 7px;
+    }
+
+    .dth-citation {
+      font-size: 8.5px;
+      color: rgba(130, 170, 230, 0.40);
+      line-height: 1.55;
+      font-style: italic;
+      border-top: 1px solid rgba(70, 130, 255, 0.09);
+      padding-top: 5px;
+    }
+
+    .btn-twin {
+      background: linear-gradient(135deg, #0d1b36 0%, #1c3a6e 100%) !important;
+      box-shadow: 0 4px 14px rgba(13, 27, 54, 0.40) !important;
+      color: #88bbff !important;
+      border: 1px solid rgba(70, 130, 255, 0.35) !important;
+    }
+    .btn-twin:hover { opacity: 0.88 !important; }
+
+    /* ── Toggle: Healthy Baseline vs User Profile ── */
+    .dth-toggle-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .dth-toggle-label {
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      color: rgba(140, 180, 255, 0.40);
+      white-space: nowrap;
+    }
+
+    .dth-toggle {
+      display: flex;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(70, 130, 255, 0.18);
+      border-radius: 20px;
+      padding: 3px;
+      gap: 2px;
+    }
+
+    .dth-toggle-btn {
+      background: transparent;
+      border: none;
+      border-radius: 16px;
+      color: rgba(150, 190, 255, 0.45);
+      font-size: 10px;
+      font-weight: 600;
+      font-family: inherit;
+      padding: 4px 11px;
+      cursor: pointer;
+      letter-spacing: 0.02em;
+      transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+      white-space: nowrap;
+    }
+
+    .dth-toggle-btn.dth-active {
+      background: rgba(60, 120, 255, 0.22);
+      color: #88bbff;
+      box-shadow: 0 1px 8px rgba(50, 100, 255, 0.20);
+    }
+
+    /* ── High-visibility render-mode toggle ── */
+    .dth-mode-toggle {
+      border-color: rgba(90, 200, 255, 0.45);
+      background: rgba(30, 60, 120, 0.35);
+    }
+    .dth-mode-toggle .dth-toggle-btn {
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 5px 14px;
+      letter-spacing: 0.03em;
+    }
+    #btn-mode-hologram.dth-active {
+      background: linear-gradient(135deg, rgba(60,150,255,0.5), rgba(90,210,255,0.35));
+      color: #eaf6ff;
+      box-shadow: 0 0 14px rgba(70, 180, 255, 0.55);
+    }
+    #btn-mode-anatomical.dth-active {
+      background: linear-gradient(135deg, rgba(200,210,225,0.55), rgba(150,165,185,0.4));
+      color: #10141c;
+      box-shadow: 0 0 14px rgba(200, 215, 235, 0.5);
+    }
+
+    /* ── Header action buttons ── */
+    .dth-header-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    #btn-play-tour {
+      background: rgba(60, 120, 255, 0.16);
+      border: 1px solid rgba(70, 140, 255, 0.30);
+      border-radius: 8px;
+      color: #88aaff;
+      font-size: 10.5px;
+      font-weight: 700;
+      font-family: inherit;
+      padding: 5px 13px;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      transition: background 0.14s, color 0.14s;
+      white-space: nowrap;
+    }
+    #btn-play-tour:hover { background: rgba(70, 140, 255, 0.28); color: #aaccff; }
+    #btn-play-tour.tour-active {
+      background: rgba(255, 80, 50, 0.15);
+      border-color: rgba(255, 80, 50, 0.28);
+      color: #ff9988;
+    }
+    #btn-play-tour.tour-active:hover { background: rgba(255, 80, 50, 0.24); }
+
+    /* ── Active card highlight during cinematic ── */
+    .dth-tract-card {
+      transition: opacity 0.35s, border-color 0.35s, background 0.35s, box-shadow 0.35s;
+    }
+
+    .dth-tract-card.dth-active-card {
+      border-color: rgba(140, 210, 255, 0.65) !important;
+      background: rgba(50, 120, 255, 0.10) !important;
+      box-shadow: 0 0 18px rgba(60, 140, 255, 0.18);
+    }
+
+    .dth-tract-card.dth-dim-card {
+      opacity: 0.30;
+    }
+
+    /* ── Export PDF button ── */
+    #btn-export-pdf {
+      background: rgba(30, 160, 100, 0.16);
+      border: 1px solid rgba(40, 180, 110, 0.28);
+      border-radius: 8px;
+      color: #55ddaa;
+      font-size: 10.5px;
+      font-weight: 700;
+      font-family: inherit;
+      padding: 5px 13px;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      transition: background 0.14s, color 0.14s;
+      white-space: nowrap;
+    }
+    #btn-export-pdf:hover { background: rgba(40, 190, 120, 0.26); color: #77ffcc; }
+
+    #btn-compare-baseline {
+      background: rgba(150, 90, 255, 0.16);
+      border: 1px solid rgba(170, 110, 255, 0.30);
+      border-radius: 8px;
+      color: #c6a8ff;
+      font-size: 10.5px; font-weight: 700; font-family: inherit;
+      padding: 5px 13px; cursor: pointer; letter-spacing: 0.04em;
+      transition: background 0.14s, color 0.14s; white-space: nowrap;
+    }
+    #btn-compare-baseline:hover { background: rgba(170, 110, 255, 0.28); color: #dcc6ff; }
+
+    /* ── Side-by-side Patient vs Healthy-Baseline comparison overlay ── */
+    #compare-overlay {
+      position: fixed; inset: 0; z-index: 600; display: none;
+      align-items: center; justify-content: center; padding: 24px;
+      background: rgba(6, 10, 20, 0.72);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    }
+    #compare-overlay.open { display: flex; }
+    .cmp-panel {
+      width: min(1040px, 100%); max-height: calc(100vh - 48px); overflow-y: auto;
+      background: rgba(15, 23, 42, 0.82); border: 1px solid rgba(90, 200, 255, 0.24);
+      border-radius: 18px; box-shadow: 0 24px 72px rgba(0,0,0,0.55); padding: 20px 24px 22px;
+      color: var(--text-1);
+    }
+    .cmp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
+    .cmp-title { font-size: 13px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; color: #a9d0ff; }
+    .cmp-sub { font-size: 10.5px; color: var(--text-2); margin-top: 3px; max-width: 720px; line-height: 1.5; }
+    #cmp-close {
+      flex-shrink: 0; background: rgba(60,110,255,0.14); border: 1px solid rgba(70,130,255,0.28);
+      border-radius: 8px; color: #9fc0ff; font-size: 12px; font-family: inherit; padding: 6px 13px; cursor: pointer;
+    }
+    .cmp-brains { display: flex; gap: 16px; }
+    .cmp-brain { flex: 1; min-width: 0; text-align: center; }
+    .cmp-brain img { width: 100%; border-radius: 12px; border: 1px solid rgba(255,255,255,0.10); background: #060a12; display: block; }
+    .cmp-brain-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 6px; }
+    .cmp-brain.patient  .cmp-brain-label { color: #ff9d8f; }
+    .cmp-brain.baseline .cmp-brain-label { color: #6ee7b7; }
+    .cmp-diffs { margin-top: 16px; }
+    .cmp-diffs-title { font-size: 9px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-3); margin-bottom: 8px; }
+    .cmp-row {
+      display: grid; grid-template-columns: 1.4fr 0.9fr 1.6fr; gap: 12px; align-items: start;
+      padding: 9px 12px; border: 1px solid rgba(120,150,200,0.12); border-radius: 9px; margin-bottom: 7px;
+      background: rgba(255,255,255,0.02); font-size: 11px;
+    }
+    .cmp-row .cmp-tract { font-weight: 700; color: #a9c8ff; }
+    .cmp-row .cmp-tract small { display: block; font-weight: 500; color: var(--text-3); font-size: 9.5px; margin-top: 2px; }
+    .cmp-metric { color: var(--text-2); }
+    .cmp-metric .cmp-z { font-weight: 700; }
+    .cmp-delta { color: #cdd8ea; line-height: 1.5; }
+    .cmp-delta .cmp-band-marked   { color: #ff8a7a; font-weight: 700; }
+    .cmp-delta .cmp-band-moderate { color: #ffb27a; font-weight: 700; }
+    .cmp-delta .cmp-band-mild     { color: #ffd27a; font-weight: 700; }
+    .cmp-delta .cmp-band-hyper    { color: #c9a8ff; font-weight: 700; }
+    .cmp-refs { margin-top: 12px; font-size: 8.5px; font-style: italic; color: rgba(150,180,230,0.5); line-height: 1.55; }
+    .cmp-empty { font-size: 11px; color: var(--text-2); padding: 16px; text-align: center; }
+    @media (max-width: 720px) { .cmp-brains { flex-direction: column; } .cmp-row { grid-template-columns: 1fr; gap: 4px; } }
+
+    /* ── §4D projection slider + §3 surgical strip ── */
+    .dth-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; margin: 4px 0 12px; padding: 9px 12px;
+      background: rgba(255,255,255,0.03); border: 1px solid rgba(120,150,200,0.14); border-radius: 10px; }
+    .dth-slider-wrap { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 260px; }
+    .dth-tool-label { font-size: 9px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-2); white-space: nowrap; }
+    .dth-tool-label.surgical { color: #ff9d8f; }
+    .dth-slider { flex: 1; height: 4px; -webkit-appearance: none; appearance: none; border-radius: 2px; outline: none; cursor: pointer;
+      background: linear-gradient(90deg, #5ad2ff var(--val,0%), rgba(255,255,255,0.14) var(--val,0%)); }
+    .dth-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: #5ad2ff; box-shadow: 0 0 8px rgba(90,210,255,0.7); cursor: pointer; }
+    .dth-slider::-moz-range-thumb { width: 15px; height: 15px; border: none; border-radius: 50%; background: #5ad2ff; cursor: pointer; }
+    .dth-tool-val { font-size: 11px; font-weight: 700; color: #a9d8ff; min-width: 74px; text-align: right; }
+    #lesion-tools { display: flex; align-items: center; gap: 10px; }
+    #lesion-tools.hidden { display: none; }
+    #btn-clear-lesions { background: rgba(255,90,90,0.14); border: 1px solid rgba(255,90,90,0.30); border-radius: 7px;
+      color: #ff9d8f; font-size: 10px; font-weight: 700; font-family: inherit; padding: 4px 11px; cursor: pointer; }
+    #btn-surgical-mode.active { background: rgba(255,80,60,0.20) !important; border-color: rgba(255,80,60,0.45) !important; color: #ff9d8f !important; }
+    #btn-surgical-mode { background: rgba(255,90,70,0.12); border: 1px solid rgba(255,90,70,0.26); border-radius: 8px; color: #ff9d8f;
+      font-size: 10.5px; font-weight: 700; font-family: inherit; padding: 5px 13px; cursor: pointer; letter-spacing: 0.04em; white-space: nowrap; transition: background .14s; }
+    #btn-load-scan { background: rgba(90,180,255,0.14); border: 1px solid rgba(90,180,255,0.30); border-radius: 8px; color: #9fd0ff;
+      font-size: 10.5px; font-weight: 700; font-family: inherit; padding: 5px 13px; cursor: pointer; letter-spacing: 0.04em; white-space: nowrap; }
+
+    /* ── Lesion network-mapping warnings ── */
+    .lesion-warnings { margin-top: 12px; display: flex; flex-direction: column; gap: 7px; }
+    .lesion-warnings.hidden { display: none; }
+    .lesion-card { border-radius: 9px; padding: 10px 12px; border: 1px solid rgba(255,80,60,0.30); background: rgba(255,60,50,0.07); }
+    .lesion-card.safe { border-color: rgba(60,220,140,0.30); background: rgba(52,211,153,0.06); }
+    .lesion-card-title { font-size: 11px; font-weight: 800; color: #ff9d8f; letter-spacing: 0.03em; margin-bottom: 4px; }
+    .lesion-card.safe .lesion-card-title { color: #6ee7b7; }
+    .lesion-row { font-size: 10.5px; color: #e6d2cf; line-height: 1.5; }
+    .lesion-row b { color: #ffb3a3; }
+
+    /* ── NiiVue importer overlay (its own WebGL context) ── */
+    #niivue-overlay { position: fixed; inset: 0; z-index: 700; display: none; background: #05070d; }
+    #niivue-overlay.open { display: block; }
+    #niivue-real { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
+    .nv-toolbar { position: absolute; top: 0; left: 0; right: 0; z-index: 2; display: flex; align-items: center; gap: 14px;
+      padding: 10px 16px; background: rgba(8,12,22,0.82); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      border-bottom: 1px solid rgba(90,160,255,0.2); }
+    .nv-title { font-size: 13px; font-weight: 800; color: #a9d0ff; letter-spacing: 0.04em; }
+    .nv-status { flex: 1; font-size: 11px; color: var(--text-2); }
+    .nv-file-btn { font-size: 11px; font-weight: 700; color: #9fd0ff; background: rgba(90,180,255,0.14); border: 1px solid rgba(90,180,255,0.30);
+      border-radius: 7px; padding: 6px 12px; cursor: pointer; }
+    #btn-close-niivue { font-size: 11px; font-weight: 700; font-family: inherit; color: #ff9d8f; background: rgba(255,80,60,0.14);
+      border: 1px solid rgba(255,80,60,0.30); border-radius: 7px; padding: 6px 13px; cursor: pointer; }
+    .nv-hint { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 2; text-align: center;
+      font-size: 11px; color: rgba(160,190,235,0.6); background: rgba(8,12,22,0.6); padding: 8px 16px; border-radius: 10px; max-width: 80%; }
+
+    /* ═══════════════════════════════════════
+       PRINT LAYOUT — hidden on screen
+    ═══════════════════════════════════════ */
+    #print-layout { display: none; }
+
+    /* ═══════════════════════════════════════
+       @media print — A4 clinical document
+    ═══════════════════════════════════════ */
+    @media print {
+      /* Hide all interactive / 3D UI */
+      #canvas-container,
+      #panel,
+      #api-panel,
+      #hint,
+      #brain-dbg,
+      #view-mode-global,
+      #clinical-insight,
+      #digital-twin-hud,
+      #dashboard-panel { display: none !important; }
+
+      body {
+        background: #ffffff !important;
+        color: #000000 !important;
+        overflow: visible !important;
+        font-family: 'Times New Roman', Georgia, serif;
+        font-size: 10.5pt;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      #print-layout {
+        display: block !important;
+        width: 170mm;
+        margin: 0 auto;
+        padding: 0;
+        color: #000000;
+      }
+
+      /* ── Research Liability Watermark (print) ── */
+      .print-watermark {
+        background: #FFF8E1 !important;
+        border: 1.5pt solid #F59E0B;
+        border-radius: 3pt;
+        color: #7C4A00 !important;
+        font-family: 'Inter', Arial, sans-serif;
+        font-size: 7.5pt;
+        font-weight: 800;
+        letter-spacing: 0.07em;
+        padding: 4pt 10pt;
+        text-align: center;
+        text-transform: uppercase;
+        margin-bottom: 8pt;
+      }
+
+      /* ── Header ── */
+      .pr-header { margin-bottom: 10pt; }
+
+      .pr-logo-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 10pt;
+        margin-bottom: 5pt;
+      }
+      .pr-logo-icon { font-size: 22pt; line-height: 1; flex-shrink: 0; }
+
+      .pr-title {
+        font-family: 'Inter', Arial, sans-serif;
+        font-size: 14pt;
+        font-weight: 700;
+        color: #0a1a3a;
+        line-height: 1.2;
+        margin-bottom: 2pt;
+      }
+      .pr-subtitle {
+        font-size: 8.5pt;
+        color: #444;
+        line-height: 1.4;
+      }
+      .pr-meta {
+        font-size: 8pt;
+        color: #666;
+        margin-bottom: 6pt;
+      }
+      .pr-rule {
+        border: none;
+        border-top: 1px solid #333;
+        margin: 6pt 0 10pt;
+      }
+
+      /* ── Clinical dashboard band: patient profile + radar ── */
+      .pr-dashboard {
+        display: flex;
+        gap: 12pt;
+        align-items: flex-start;
+        margin-bottom: 10pt;
+      }
+      .pr-dash-profile { flex: 1; min-width: 0; }
+      .pr-dash-radar { flex: 0 0 62mm; }
+      .pr-radar-box { width: 100%; }
+      .pr-radar-box svg { width: 100%; height: auto; display: block; }
+
+      /* ── Two-column top section ── */
+      .pr-two-col {
+        display: flex;
+        gap: 12pt;
+        margin-bottom: 10pt;
+        align-items: flex-start;
+      }
+      .pr-snapshot-col { flex: 0 0 78mm; }
+      .pr-timeline-col { flex: 1; }
+
+      .pr-section-label {
+        font-family: 'Inter', Arial, sans-serif;
+        font-size: 7pt;
+        font-weight: 700;
+        letter-spacing: 0.10em;
+        text-transform: uppercase;
+        color: #3B7BF8;
+        margin-bottom: 4pt;
+        border-bottom: 1px solid #dde8ff;
+        padding-bottom: 2pt;
+      }
+
+      .pr-brain-img {
+        width: 100%;
+        border: 1px solid #ccc;
+        border-radius: 4pt;
+        display: block;
+        margin-bottom: 5pt;
+        background: #030810;
+      }
+      .pr-snapshot-caption {
+        font-size: 7pt;
+        color: #666;
+        line-height: 1.4;
+        font-style: italic;
+      }
+
+      /* Timeline SVG: constrain to column width */
+      #print-timeline-svg svg {
+        width: 100% !important;
+        height: auto !important;
+      }
+
+      /* ── Tract findings ── */
+      #print-tract-findings { margin: 6pt 0 10pt; }
+
+      .pr-tract {
+        margin-bottom: 8pt;
+        padding: 5pt 7pt;
+        border-left: 2.5pt solid #3B7BF8;
+        background: #f7faff;
+        page-break-inside: avoid;
+      }
+      .pr-tract.pr-deficit  { border-color: #E84848; background: #fff7f7; }
+      .pr-tract.pr-normal   { border-color: #22C97A; background: #f4fff9; }
+      .pr-tract.pr-reference{ border-color: #10B8A6; background: #f4fffd; }
+      .pr-tract.pr-untested { border-color: #B6C0D4; background: #f7f9fc; color: #667; }
+
+      .pr-tract h3 {
+        font-family: 'Inter', Arial, sans-serif;
+        font-size: 9.5pt;
+        font-weight: 700;
+        color: #0a1a3a;
+        margin: 0 0 3pt;
+      }
+      .pr-tract p {
+        margin: 0 0 2pt;
+        font-size: 8.5pt;
+        line-height: 1.5;
+        color: #222;
+      }
+      .pr-status-deficit   { color: #c03030; }
+      .pr-status-normal    { color: #186a3b; }
+      .pr-status-reference { color: #0e6655; }
+      .pr-status-untested  { color: #7a8699; }
+
+      /* ── Citations ── */
+      .pr-citations {
+        margin: 4pt 0 10pt 14pt;
+        padding: 0;
+        font-size: 7.5pt;
+        color: #333;
+        line-height: 1.55;
+      }
+      .pr-citations li { margin-bottom: 3pt; }
+
+      /* ── Footer disclaimer ── */
+      .pr-footer {
+        font-size: 7pt;
+        color: #777;
+        margin-top: 8pt;
+        padding-top: 5pt;
+        border-top: 1px solid #ccc;
+        line-height: 1.45;
+      }
+
+      /* ── Patient profile block ── */
+      .pr-patient-profile {
+        margin: 0 0 10pt; padding: 7pt 10pt;
+        background: #f4f8ff; border: 1pt solid #c5d8f0; border-radius: 4pt;
+        display: flex; flex-wrap: wrap; gap: 4pt 18pt;
+      }
+      .pr-pp-item { font-size: 8.5pt; color: #222; }
+      .pr-pp-label { font-weight: 700; color: #3B7BF8; font-size: 7.5pt; text-transform: uppercase; margin-right: 3pt; }
+      .pr-confounder-print {
+        margin: 0 0 8pt; padding: 5pt 9pt;
+        background: #fff4f0; border-left: 3pt solid #E84848;
+        font-size: 8.5pt; color: #803020; font-weight: 600; line-height: 1.4;
+      }
+      .pr-confounder-print strong { color: #C03030; }
+
+      @page {
+        size: A4 portrait;
+        margin: 18mm 20mm;
+      }
+    }
+
+    /* ── Bottom hint ───────────────── */
+    #hint {
+      position: fixed;
+      bottom: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 10.5px;
+      font-weight: 500;
+      color: rgba(180,200,255,.45);
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+      z-index: 10;
+    }
+
+    /* ── Global render-mode toggle (menu + timeline + twin) ── */
+    #view-mode-global {
+      position: fixed;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 12;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 6px 5px 12px;
+      background: rgba(15, 23, 42, 0.62);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid rgba(90, 200, 255, 0.30);
+      border-radius: 22px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+    }
+    #view-mode-global .vmg-label {
+      font-size: 8px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--text-3); margin-right: 2px;
+    }
+    .vmg-btn {
+      border: none; border-radius: 16px; cursor: pointer; font-family: inherit;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.02em; padding: 6px 14px;
+      background: transparent; color: rgba(160, 195, 255, 0.55);
+      transition: background 0.18s, color 0.18s, box-shadow 0.18s; white-space: nowrap;
+    }
+    #vmg-hologram.vmg-active {
+      background: linear-gradient(135deg, rgba(60,150,255,0.5), rgba(90,210,255,0.35));
+      color: #eaf6ff; box-shadow: 0 0 14px rgba(70,180,255,0.5);
+    }
+    #vmg-anatomical.vmg-active {
+      background: linear-gradient(135deg, rgba(205,214,228,0.6), rgba(150,165,185,0.42));
+      color: #10141c; box-shadow: 0 0 14px rgba(200,215,235,0.5);
+    }
+    @media (max-width: 640px) { #view-mode-global { display: none; } }
+  </style>
+
+  <!-- ═══ Pathophysiology Simulator: new tests + Live Insight panel ═══ -->
+  <style>
+    /* New menu-test buttons (kept for any JS that applies these classes) */
+    .btn-fluency { background: var(--teal); }
+    .btn-fluency:hover { background: #0F766E; }
+    .btn-raadsr  { background: var(--purple); }
+    .btn-raadsr:hover { background: #6D28D9; }
+    .btn-battery { background: #1e3a5f; letter-spacing:0.02em; }
+    .btn-battery:hover { background: #162a44; }
+    .btn-motor   { background: var(--green); }
+    .btn-motor:hover { background: #047857; }
+
+    /* ── Finger Tapping Test screen ── */
+    .ftt-stage { text-align:center; padding:22px 0 4px; }
+    #ftt-counter {
+      font-size: 6.5rem; font-weight: 900; line-height: 1;
+      color: #1A2A6C; letter-spacing: -3px;
+      font-variant-numeric: tabular-nums;
+      transition: color 0.1s;
+    }
+    #ftt-counter.tapping { color: #22C97A; }
+    .ftt-tap-label {
+      font-size: 11px; font-weight: 800; letter-spacing: 0.20em;
+      text-transform: uppercase; color: #A8B8D0; margin-top: 6px;
+    }
+    .ftt-timer-section { margin: 14px 0 8px; }
+    .ftt-timer-display {
+      text-align: center; font-size: 2.4rem; font-weight: 700;
+      color: #3B7BF8; font-variant-numeric: tabular-nums; margin-bottom: 8px;
+    }
+    .ftt-timer-unit { font-size: 1.1rem; font-weight: 500; color: #7A9ECC; margin-left: 2px; }
+    .ftt-bar-wrap { background: #E8F0FF; border-radius: 4px; height: 7px; overflow: hidden; }
+    .ftt-bar {
+      height: 100%; width: 100%;
+      background: linear-gradient(90deg, #3B7BF8, #22C97A);
+      border-radius: 4px; transition: width 0.1s linear;
+    }
+    .ftt-instructions {
+      text-align: center; font-size: 13px; color: #637087;
+      margin-top: 18px; line-height: 1.6; transition: opacity 0.35s;
+    }
+    kbd {
+      display: inline-block; background: #F0F4FF;
+      border: 1.5px solid #C0CFEE; border-radius: 5px;
+      padding: 1px 8px; font-family: 'Courier New', monospace;
+      font-size: 12px; color: #2A4A9B; font-weight: 700;
+      box-shadow: 0 2px 0 #C0CFEE;
+    }
+    /* ── Practice badge ─────────────────────────── */
+    #practice-badge {
+      display: none; position: sticky; top: 0; z-index: 5;
+      align-items: center; justify-content: center; gap: 6px;
+      background: #FEF3C7; color: #92400E;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+      text-transform: uppercase; padding: 6px 12px;
+      border-bottom: 1px solid #FDE68A;
+    }
+    /* ── Validity warning ───────────────────────── */
+    .validity-warning {
+      background: #FFF7ED; border: 1px solid #FED7AA;
+      border-radius: var(--r-md); padding: 10px 12px;
+      font-size: 11px; color: #92400E; line-height: 1.5;
+      margin: 8px 0;
+    }
+    /* ── FTT touch button ───────────────────────── */
+    .ftt-tap-btn {
+      display: inline-block; background: var(--primary); color: #fff;
+      border: none; border-radius: 12px; padding: 14px 32px;
+      font-size: 18px; font-weight: 800; letter-spacing: 0.05em;
+      cursor: pointer; touch-action: manipulation;
+      box-shadow: 0 4px 16px rgba(37,99,235,.35);
+      margin: 8px 0;
+    }
+    @media (max-width: 640px) {
+      .ftt-kb-hint { display: none; }
+      .ftt-tap-btn { display: inline-block !important; }
+    }
+
+    /* ── Go / No-Go screen ── */
+    .gng-cue { font-size: 11px; color: var(--text-2); text-align: center; line-height: 1.5; margin-bottom: 10px; }
+    .gng-stage { display: flex; align-items: center; justify-content: center; height: 168px; }
+    .gng-stim {
+      width: 128px; height: 128px; border-radius: 50%;
+      border: 2px solid var(--border); background: rgba(255,255,255,0.04);
+      color: #fff; font-size: 20px; font-weight: 800; letter-spacing: 0.06em;
+      font-family: inherit; cursor: pointer; touch-action: manipulation;
+      transition: transform 0.08s, box-shadow 0.12s, background 0.08s, border-color 0.08s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .gng-stim.idle { background: rgba(255,255,255,0.03); border-color: var(--border); box-shadow: none; }
+    .gng-stim.go {
+      background: radial-gradient(circle at 40% 35%, #4ade80, #15a34a);
+      border-color: #34d399; color: #04210f; box-shadow: 0 0 34px rgba(52,211,153,0.55);
+    }
+    .gng-stim.nogo {
+      background: radial-gradient(circle at 40% 35%, #ff8a7a, #dc2626);
+      border-color: #ff6b5a; color: #2a0606; box-shadow: 0 0 34px rgba(255,107,90,0.55);
+    }
+    .gng-stim.hit  { transform: scale(0.9); box-shadow: 0 0 46px rgba(90,210,255,0.7); }
+    .gng-stim.err  { transform: scale(1.06); box-shadow: 0 0 46px rgba(255,80,60,0.8); }
+    .gng-feedback { text-align: center; font-size: 12px; font-weight: 700; height: 18px; margin: 4px 0 10px; letter-spacing: 0.02em; }
+
+    /* ── Trail Making Test (TMT-B) screen ── */
+    .tmt-cue { font-size: 11px; color: var(--text-2); text-align: center; line-height: 1.5; margin-bottom: 10px; }
+    .tmt-board {
+      position: relative; width: 100%; height: 300px;
+      background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+      border-radius: 12px; overflow: hidden; margin-bottom: 10px;
+    }
+    .tmt-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    .tmt-nodes { position: absolute; inset: 0; }
+    .tmt-node {
+      position: absolute; width: 34px; height: 34px; border-radius: 50%;
+      border: 1.5px solid rgba(120,170,255,0.5); background: rgba(15,23,42,0.85);
+      color: var(--text-1); font-size: 13px; font-weight: 700; font-family: inherit;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      touch-action: manipulation; transition: transform 0.1s, box-shadow 0.12s, background 0.12s, border-color 0.12s;
+    }
+    .tmt-node.target {
+      border-color: #5ad2ff; color: #dff4ff;
+      box-shadow: 0 0 0 2px rgba(90,210,255,0.35), 0 0 18px rgba(90,210,255,0.5);
+      animation: tmtPulse 1.1s ease-in-out infinite;
+    }
+    @keyframes tmtPulse { 0%,100% { box-shadow: 0 0 0 2px rgba(90,210,255,0.30), 0 0 14px rgba(90,210,255,0.4); } 50% { box-shadow: 0 0 0 3px rgba(90,210,255,0.55), 0 0 22px rgba(90,210,255,0.7); } }
+    .tmt-node.done {
+      border-color: rgba(52,211,153,0.6); background: rgba(21,163,74,0.30);
+      color: #b6f0cf; box-shadow: none; animation: none; cursor: default;
+    }
+    .tmt-node.wrong { border-color: #ff6b5a; background: rgba(220,38,38,0.4); color: #fff; transform: scale(1.12); }
+
+    /* ── Rest / Baseline screen (Full Clinical Battery) ── */
+    .rest-big  { font-size: 72px; font-weight: 800; color: #3B7BF8; text-align: center; margin: 10px 0 2px; }
+    .rest-sub  { text-align: center; color: #637087; font-size: 14px; margin-bottom: 14px; }
+    .rest-bar  { height: 100%; width: 100%; background: linear-gradient(90deg,#3B7BF8,#22C97A); transition: width 1s linear; }
+    .rest-next { text-align: center; color: #8aa0c4; font-size: 12px; margin-top: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+
+    /* ── Verbal Fluency screen ── */
+    .fluency-prompt-big {
+      font-size: 60px; font-weight: 800; color: #15B8A6;
+      text-align: center; margin: 4px 0 2px; letter-spacing: 0.02em;
+    }
+    .fluency-bar-wrap {
+      height: 6px; background: #e7eefb; border-radius: 4px;
+      overflow: hidden; margin: 6px 0 14px;
+    }
+    #fluency-bar {
+      height: 100%; width: 100%;
+      background: linear-gradient(90deg,#15B8A6,#0E8C7E); transition: width .12s linear;
+    }
+    .raadsr-bar {
+      height: 100%; width: 0;
+      background: linear-gradient(90deg,#C95AE0,#8E44AD); transition: width .2s ease;
+    }
+    #fluency-input {
+      width: 100%; box-sizing: border-box; padding: 12px 14px; font-size: 18px;
+      border: 2px solid #d6e2f5; border-radius: 10px; outline: none;
+      font-family: Inter, system-ui, sans-serif; color: #233; background: #fff;
+    }
+    #fluency-input:focus { border-color: #15B8A6; }
+    #fluency-input.shake { animation: fl-shake .3s; border-color: #e74c3c; }
+    @keyframes fl-shake {
+      0%,100% { transform: translateX(0); }
+      25% { transform: translateX(-6px); } 75% { transform: translateX(6px); }
+    }
+    .fluency-words {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      margin-top: 12px; max-height: 124px; overflow: auto;
+    }
+    .fluency-chip {
+      background: #e8faf7; color: #0E8C7E; border: 1px solid #b9ece4;
+      border-radius: 12px; padding: 3px 10px; font-size: 12px; font-weight: 600;
+    }
+
+    /* ── RAADS-R screen ── */
+    .raadsr-question {
+      font-size: 17px; line-height: 1.5; color: #2a3550; text-align: center;
+      margin: 18px 4px; min-height: 84px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .raadsr-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .raadsr-opt {
+      padding: 14px; border: 2px solid #d6e2f5; background: #fff; border-radius: 10px;
+      font-size: 14px; font-weight: 600; color: #3a4a66; cursor: pointer; transition: .15s;
+      font-family: Inter, system-ui, sans-serif;
+    }
+    .raadsr-opt:hover { border-color: #C95AE0; background: #faf3fd; }
+    .raadsr-disclaimer {
+      font-size: 10px; color: #A8B8D0; text-align: center;
+      margin-top: 16px; line-height: 1.5;
+    }
+
+    /* ── Live Clinical Insight panel ── */
+    #clinical-insight {
+      position: fixed; left: 24px; bottom: 24px; width: 360px; max-width: 42vw; z-index: 60;
+      background: rgba(10,16,30,0.92); backdrop-filter: blur(8px);
+      border: 1px solid rgba(120,160,230,0.30); border-radius: 14px;
+      padding: 18px 20px; color: #dce8ff; box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+      animation: ci-rise .35s ease;
+    }
+    #clinical-insight.hidden { display: none; }
+    @keyframes ci-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    .ci-eyebrow { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: #6f8fd0; }
+    .ci-region { font-size: 18px; font-weight: 700; margin-top: 3px; color: #eaf2ff; }
+    .ci-test { font-size: 12px; color: #9fb4dc; margin-top: 2px; }
+    .ci-badge { display: inline-block; margin-top: 8px; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
+    .ci-deficit   { background: rgba(255,80,40,0.18);  color: #ff8a5c; border: 1px solid rgba(255,80,40,0.40); }
+    .ci-hyper     { background: rgba(205,90,255,0.18); color: #d79bff; border: 1px solid rgba(205,90,255,0.40); }
+    .ci-normal    { background: rgba(60,200,140,0.16); color: #74e0a8; border: 1px solid rgba(60,200,140,0.40); }
+    .ci-reference { background: rgba(120,150,200,0.16);color: #9fb4dc; border: 1px solid rgba(120,150,200,0.40); }
+    .ci-block { margin-top: 12px; }
+    .ci-h { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6f8fd0; margin-bottom: 3px; }
+    .ci-block > div:last-child { font-size: 12.5px; line-height: 1.5; color: #cfddf8; }
+    .ci-cite {
+      margin-top: 12px; font-size: 10px; font-style: italic; color: #7f93bd; line-height: 1.4;
+      border-top: 1px solid rgba(120,160,230,0.20); padding-top: 8px;
+    }
+
+    /* ── 'Hyper-connectivity' status (HUD card + printed report) ── */
+    .dth-tract-card.status-hyper { border-left-color: #cd5aff; }
+    .dth-badge.hyper { background: rgba(205,90,255,0.16); color: #a64dd6; }
+    .pr-tract.pr-hyper { border-left-color: #9b3fd6; }
+    .pr-status-hyper { color: #9b3fd6; }
+
+    @media print { #clinical-insight, #intake-screen { display: none !important; } }
+
+    /* ═══════════════════════════════════════
+       PATIENT INTAKE MODAL
+    ═══════════════════════════════════════ */
+    #intake-screen {
+      position: fixed; inset: 0; z-index: 500;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(8,16,38,0.74);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    }
+    #intake-screen.hidden { display: none; }
+
+    #intake-modal {
+      width: min(520px, calc(100vw - 40px));
+      max-height: calc(100vh - 48px); overflow-y: auto;
+      background: rgba(15, 23, 42, 0.72); border-radius: 24px;
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      box-shadow: 0 24px 72px rgba(0,0,0,0.55), 0 0 60px rgba(30,90,220,0.12);
+      border: 1px solid rgba(255,255,255,0.12); padding: 28px 30px 26px;
+      scrollbar-width: thin; scrollbar-color: rgba(120,160,240,0.35) transparent;
+    }
+    .intake-header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 22px; }
+    .intake-header-icon {
+      width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
+      background: linear-gradient(135deg,#3B7BF8,#7AAEFF);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; box-shadow: 0 3px 12px rgba(59,123,248,0.45);
+    }
+    .intake-title { font-size: 17px; font-weight: 700; color: var(--text-1); letter-spacing: -0.01em; line-height: 1.2; margin-bottom: 3px; }
+    .intake-subtitle { font-size: 11px; color: var(--text-2); line-height: 1.5; }
+
+    .intake-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+    .intake-field { display: flex; flex-direction: column; gap: 6px; }
+    .intake-field--full { grid-column: 1 / -1; }
+
+    .intake-label { font-size: 10px; font-weight: 700; color: var(--text-2); letter-spacing: 0.07em; text-transform: uppercase; }
+    .intake-input {
+      padding: 9px 12px; border: 1.5px solid rgba(255,255,255,0.14); border-radius: 10px;
+      font-size: 14px; font-family: 'Inter', sans-serif; color: var(--text-1);
+      background: rgba(255,255,255,0.05); outline: none; transition: border-color 0.15s, background 0.15s;
+      -moz-appearance: textfield;
+    }
+    .intake-input::placeholder { color: var(--text-3); }
+    .intake-input:focus { border-color: #3B82F6; background: rgba(59,130,246,0.12); }
+    .intake-input::-webkit-outer-spin-button,
+    .intake-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+    .intake-seg { display: flex; gap: 6px; }
+    .seg-btn {
+      flex: 1; padding: 8px 4px; border: 1.5px solid rgba(255,255,255,0.14); border-radius: 9px;
+      font-size: 12px; font-weight: 600; font-family: 'Inter', sans-serif;
+      color: var(--text-2); background: rgba(255,255,255,0.04); cursor: pointer; transition: all 0.14s;
+    }
+    .seg-btn:hover { border-color: rgba(59,130,246,0.5); color: var(--text-1); }
+    .seg-btn.active { background: #3B82F6; border-color: #3B82F6; color: #fff; }
+
+    .intake-slider {
+      width: 100%; height: 4px; appearance: none; -webkit-appearance: none;
+      background: linear-gradient(90deg, #3B82F6 var(--val,40%), rgba(255,255,255,0.14) var(--val,40%));
+      border-radius: 2px; outline: none; cursor: pointer; margin-top: 2px;
+    }
+    .intake-slider::-webkit-slider-thumb {
+      appearance: none; -webkit-appearance: none; width: 18px; height: 18px;
+      border-radius: 50%; background: #3B82F6; box-shadow: 0 1px 8px rgba(59,130,246,0.6); cursor: pointer;
+    }
+    .intake-slider::-moz-range-thumb {
+      width: 18px; height: 18px; border: none; border-radius: 50%; background: #3B82F6; cursor: pointer;
+    }
+    .slider-ticks { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-3); margin-top: 3px; }
+    .clarity-val-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px; border-radius: 50%; background: rgba(59,130,246,0.18);
+      color: #9FC0E8; font-weight: 700; font-size: 13px; margin-left: 6px; vertical-align: middle;
+    }
+
+    .intake-section-title {
+      font-size: 10px; font-weight: 700; color: var(--text-2); letter-spacing: 0.08em;
+      text-transform: uppercase; margin: 18px 0 10px;
+      padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .intake-checks { display: flex; flex-direction: column; gap: 10px; }
+    .intake-check-label {
+      display: flex; align-items: center; gap: 10px; cursor: pointer;
+      font-size: 13px; color: #C7D8EF; font-family: 'Inter', sans-serif; line-height: 1.4;
+    }
+    .intake-check-label input[type="checkbox"] { display: none; }
+    .check-box {
+      width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.18); border-radius: 5px;
+      background: rgba(255,255,255,0.05); flex-shrink: 0; display: flex; align-items: center;
+      justify-content: center; transition: all 0.14s;
+    }
+    .intake-check-label input:checked + .check-box { background: #3B82F6; border-color: #3B82F6; }
+    .intake-check-label input:checked + .check-box::after { content: '✓'; font-size: 11px; color: #fff; font-weight: 700; }
+    .intake-error { font-size: 12px; color: var(--red); margin-top: 8px; min-height: 18px; }
+    select.intake-input { appearance: none; -webkit-appearance: none; cursor: pointer;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238A9ABB'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 11px center; padding-right: 28px; }
+    select.intake-input option { background: #0e1626; color: var(--text-1); }
+
+    /* ── Patient Profile Summary (dashboard) ── */
+    .profile-summary-bar {
+      display: flex; flex-wrap: wrap; gap: 6px 14px;
+      padding: 10px 14px; background: rgba(255,255,255,0.04); border-radius: 10px;
+      border: 1px solid var(--border); margin-bottom: 10px;
+    }
+    .psb-item { display: flex; align-items: baseline; gap: 4px; font-size: 11px; color: #C7D8EF; }
+    .psb-label { font-weight: 700; color: var(--text-3); text-transform: uppercase; font-size: 8.5px; letter-spacing: 0.08em; }
+
+    /* ── Confounder Alert (dashboard) ── */
+    .confounder-alert {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 14px;
+      background: linear-gradient(135deg,#FFF4F0,#FFF8F0);
+      border: 1.5px solid #FFCCA0; border-radius: 10px; margin-bottom: 10px;
+    }
+    .confounder-alert.hidden { display: none; }
+    .ca-icon {
+      width: 22px; height: 22px; border-radius: 50%; background: #E85530;
+      color: #fff; font-size: 13px; font-weight: 800;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
+    }
+    .ca-title { font-size: 9.5px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: #C04010; margin-bottom: 2px; }
+    .ca-body { font-size: 11px; color: #803020; line-height: 1.45; }
+
+    /* ── Research Liability Watermark (dashboard) ── */
+    .research-watermark {
+      background: #FFF8E1;
+      border: 1.5px solid #F59E0B;
+      border-radius: 7px;
+      color: #7C4A00;
+      font-family: 'Inter', 'SF Pro Display', Arial, sans-serif;
+      font-size: 10.5px;
+      font-weight: 800;
+      letter-spacing: 0.07em;
+      padding: 8px 16px;
+      text-align: center;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="canvas-container">
+  <canvas id="niivue-gl" style="width:100%;height:100%;display:block;"></canvas>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     LEFT PANEL
+════════════════════════════════════════════════ -->
+<div id="panel">
+  <div id="practice-badge">⬡ Practice Round — not recorded</div>
+  <div id="panel-header">
+    <div class="panel-logo">
+      <div class="panel-logo-icon">🧠</div>
+      <div class="panel-logo-text">
+        <h1>Brain Trainer</h1>
+        <div class="tagline">Cognitive Suite</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Screen: Main Menu ══ -->
+  <div id="screen-menu" class="screen">
+
+    <div class="test-section-label">Cognitive Tests</div>
+
+    <div class="test-row" data-test="rsvp">
+      <div class="test-icon">⚡</div>
+      <div class="test-info">
+        <div class="test-name">RSVP Reading</div>
+        <div class="test-region">Language · Left Temporal</div>
+      </div>
+      <button id="btn-start-rsvp" class="test-start-btn">Start</button>
+    </div>
+
+    <div class="test-row" data-test="nback">
+      <div class="test-icon">🔵</div>
+      <div class="test-info">
+        <div class="test-name">2-Back Memory</div>
+        <div class="test-region">Working Memory · Frontal</div>
+      </div>
+      <button id="btn-start-nback" class="test-start-btn purple">Start</button>
+    </div>
+
+    <div class="test-row" data-test="stroop">
+      <div class="test-icon">🎨</div>
+      <div class="test-info">
+        <div class="test-name">Stroop Task</div>
+        <div class="test-region">Executive Function · Frontal</div>
+      </div>
+      <button id="btn-start-stroop" class="test-start-btn teal">Start</button>
+    </div>
+
+    <div class="test-row" data-test="corsi">
+      <div class="test-icon">🧩</div>
+      <div class="test-info">
+        <div class="test-name">Corsi Block-Tapping</div>
+        <div class="test-region">Visuospatial · Hippocampus</div>
+      </div>
+      <button id="btn-start-corsi" class="test-start-btn amber">Start</button>
+    </div>
+
+    <div class="test-row" data-test="verbalFluency">
+      <div class="test-icon">🗣️</div>
+      <div class="test-info">
+        <div class="test-name">Verbal Fluency (FAS)</div>
+        <div class="test-region">Lexical Retrieval · Broca</div>
+      </div>
+      <button id="btn-start-fluency" class="test-start-btn teal">Start</button>
+    </div>
+
+    <div class="test-row" data-test="aq10">
+      <div class="test-icon">🧠</div>
+      <div class="test-info">
+        <div class="test-name">AQ-10 Screener</div>
+        <div class="test-region">NICE-validated · Amygdala–vmPFC</div>
+      </div>
+      <button id="btn-start-aq10" class="test-start-btn purple">Start</button>
+    </div>
+
+    <div class="test-row" data-test="fingerTapping">
+      <div class="test-icon">🤚</div>
+      <div class="test-info">
+        <div class="test-name">Finger Tapping</div>
+        <div class="test-region">Motor Speed · CST</div>
+      </div>
+      <button id="btn-start-ftt" class="test-start-btn green">Start</button>
+    </div>
+
+    <div class="test-section-label" style="margin-top:6px;">TBI / Neurosurgical Triage</div>
+
+    <div class="test-row" data-test="goNoGo">
+      <div class="test-icon">🚦</div>
+      <div class="test-info">
+        <div class="test-name">Go / No-Go</div>
+        <div class="test-region">Response Inhibition · R IFG–preSMA</div>
+      </div>
+      <button id="btn-start-gonogo" class="test-start-btn navy">Start</button>
+    </div>
+
+    <div class="test-row" data-test="trailsB">
+      <div class="test-icon">🔗</div>
+      <div class="test-info">
+        <div class="test-name">Trail Making (TMT-B)</div>
+        <div class="test-region">Set-Shifting · Frontoparietal</div>
+      </div>
+      <button id="btn-start-trails" class="test-start-btn teal">Start</button>
+    </div>
+
+    <div style="display:flex;gap:6px;margin-top:10px;">
+      <button id="btn-start-battery" class="btn-primary btn-battery" style="flex:1;font-size:11px;padding:8px 0;">&#9673; Full Battery</button>
+      <button id="btn-timeline" class="btn-secondary btn-timeline" style="flex:1;font-size:11px;padding:8px 0;">&#9202; Timeline</button>
+    </div>
+
+    <hr class="legend-divider" style="margin-top:12px;">
+    <div class="legend-heading">Brain Regions</div>
+    <div id="legend"></div>
+  </div>
+
+  <!-- ══ Screen: RSVP ══ -->
+  <div id="screen-rsvp" class="screen hidden">
+    <button class="btn-quit" id="btn-quit-rsvp">✕&nbsp; Quit to Menu</button>
+    <div class="screen-label">Reading — stay focused</div>
+    <div class="rsvp-stage">
+      <div id="rsvp-word"></div>
+    </div>
+    <div class="rsvp-footer">
+      <span id="rsvp-count">1 / 6</span>
+      <span class="rsvp-speed">300 ms / word</span>
+    </div>
+    <div class="progress-track"><div id="rsvp-bar"></div></div>
+  </div>
+
+  <!-- ══ Screen: Comprehension Question ══ -->
+  <div id="screen-question" class="screen hidden">
+    <div class="screen-label">Comprehension Check</div>
+    <div class="question-text">What was bypassed?</div>
+    <div class="timer-row">
+      <span class="timer-label">Time&nbsp;</span>
+      <span id="timer-val">0.0</span>
+      <span class="timer-unit">s</span>
+    </div>
+    <div class="choices" id="choices">
+      <button class="choice-btn" data-answer="wrong">The heart</button>
+      <button class="choice-btn" data-answer="correct">The occluded vessel</button>
+      <button class="choice-btn" data-answer="wrong">The brain</button>
+    </div>
+    <div class="answer-hint">Answer quickly · score decays after 2 s</div>
+  </div>
+
+  <!-- ══ Screen: N-Back Game ══ -->
+  <div id="screen-nback" class="screen hidden">
+    <button class="btn-quit" id="btn-quit-nback">✕&nbsp; Quit to Menu</button>
+    <div class="screen-label">2-Back · <span id="nback-trial-num">— / 10</span></div>
+
+    <div class="nback-stage">
+      <div class="nback-box" id="nback-box">
+        <div id="nback-letter"></div>
+      </div>
+    </div>
+
+    <div class="nback-cue">
+      Press MATCH if this letter equals the one <strong>2 steps ago</strong>
+    </div>
+
+    <button id="btn-match" class="btn-match">✓&nbsp; MATCH</button>
+
+    <div class="nback-trail" id="nback-trail">
+      <!-- 10 dots injected by JS -->
+    </div>
+
+    <div class="nback-live-stats">
+      <div class="live-stat">
+        <div class="live-stat-val" id="live-hits">0</div>
+        <div class="live-stat-label">Hits</div>
+      </div>
+      <div class="live-stat">
+        <div class="live-stat-val" id="live-fas">0</div>
+        <div class="live-stat-label">False Alarms</div>
+      </div>
+      <div class="live-stat">
+        <div class="live-stat-val" id="live-acc">—</div>
+        <div class="live-stat-label">Running Acc.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Screen: Stroop Task ══ -->
+  <div id="screen-stroop" class="screen hidden">
+    <button class="btn-quit" id="btn-quit-stroop">✕&nbsp; Quit to Menu</button>
+    <div class="screen-label">Stroop · <span id="stroop-trial-num">— / 12</span></div>
+
+    <div class="stroop-display">
+      <div id="stroop-word">—</div>
+    </div>
+
+    <div class="stroop-progress"><div id="stroop-bar"></div></div>
+
+    <div class="stroop-cue">
+      Select the <strong>ink color</strong> of the word above
+    </div>
+
+    <div class="stroop-choices" id="stroop-choices">
+      <button class="stroop-btn" data-color="red">Red</button>
+      <button class="stroop-btn" data-color="blue">Blue</button>
+      <button class="stroop-btn" data-color="green">Green</button>
+      <button class="stroop-btn" data-color="yellow">Yellow</button>
+      <button class="stroop-btn" data-color="purple">Purple</button>
+    </div>
+
+    <div class="stroop-feedback" id="stroop-feedback"></div>
+
+    <div class="nback-live-stats">
+      <div class="live-stat">
+        <div class="live-stat-val" id="stroop-correct">0</div>
+        <div class="live-stat-label">Correct</div>
+      </div>
+      <div class="live-stat">
+        <div class="live-stat-val" id="stroop-rt">—</div>
+        <div class="live-stat-label">Avg RT ms</div>
+      </div>
+      <div class="live-stat">
+        <div class="live-stat-val" id="stroop-acc">—</div>
+        <div class="live-stat-label">Accuracy</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Screen: Corsi Block-Tapping ══ -->
+  <div id="screen-corsi" class="screen hidden">
+    <button class="btn-quit" id="btn-quit-corsi">✕&nbsp; Quit to Menu</button>
+    <div class="screen-label">Corsi Block-Tapping · <span id="corsi-phase">Watch</span></div>
+
+    <div class="corsi-meta">
+      <span>Span Level <strong id="corsi-span">3</strong></span>
+      <span>Trial <strong id="corsi-trial">1</strong></span>
+    </div>
+
+    <div class="corsi-board" id="corsi-board"></div>
+    <div class="corsi-hint" id="corsi-hint">Memorize the sequence…</div>
+
+    <div class="nback-live-stats">
+      <div class="live-stat">
+        <div class="live-stat-val" id="corsi-best">0</div>
+        <div class="live-stat-label">Best Span</div>
+      </div>
+      <div class="live-stat">
+        <div class="live-stat-val">5–6</div>
+        <div class="live-stat-label">Clinical Norm</div>
+      </div>
+      <div class="live-stat">
+        <div class="live-stat-val" id="corsi-acc">—</div>
+        <div class="live-stat-label">Last Trial</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Screen: Verbal Fluency ══ -->
+  <div id="screen-fluency" class="screen hidden">
+    <button class="btn-quit" id="btn-quit-fluency">✕&nbsp; Quit to Menu</button>
+    <div class="screen-label">Verbal Fluency · <span id="fluency-mode">Type words…</span></div>
+
+    <div class="fluency-prompt-big" id="fluency-prompt">F</div>
+    <div class="fluency-bar-wrap"><div id="fluency-bar"></div></div>
+
+    <input id="fluency-input" type="text" autocomplete="off" autocapitalize="off"
+           spellcheck="false" placeholder="Type a word, then press Enter…" />
+    <div class="fluency-words" id="fluency-words"></div>
+
+    <div class="nback-live-stats">
+      <div class="live-stat">
+        <div class="live-stat-val" id="fluency-count">0</div>
+        <div class="live-stat-label">Valid Words</div>
+      </div>
+      <div class="live-stat">
+        <div class="live-stat-val" id="fluency-timer">60.0</div>
+        <div class="live-stat-label">Seconds Left</div>
+      </div>
+      <div class="live-stat">
+        <div class="live-stat-val">≈ 15</div>
+        <div class="live-stat-label">Clinical Norm</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Screen: AQ-10 ══ -->
+  <div id="screen-aq10" class="screen hidden">
+    <button class="btn-quit" id="btn-quit-aq10">✕&nbsp; Quit to Menu</button>
+    <div class="screen-label">AQ-10 Autism-Spectrum Quotient · <span id="aq10-progress">Question 1 / 10</span></div>
+
+    <div class="fluency-bar-wrap"><div id="aq10-bar" class="raadsr-bar"></div></div>
+    <div class="raadsr-question" id="aq10-question">…</div>
+    <div class="raadsr-options" id="aq10-options"></div>
+
+    <div class="raadsr-disclaimer">
+      AQ-10 (Allison, Auyeung &amp; Baron-Cohen, 2012) — a NICE-recommended screening tool, not a diagnostic instrument.
+    </div>
+  </div>
+
+  <!-- ══ Screen: Finger Tapping Test ══ -->
+  <div id="screen-ftt" class="screen hidden">
+    <button class="btn-quit" id="btn-quit-ftt">✕&nbsp; Quit to Menu</button>
+    <div class="screen-label">Finger Tapping · <span id="ftt-phase">Ready</span></div>
+
+    <div class="ftt-stage">
+      <div id="ftt-counter">0</div>
+      <div class="ftt-tap-label">Taps</div>
+    </div>
+
+    <div class="ftt-timer-section">
+      <div class="ftt-timer-display">
+        <span id="ftt-timer">10.0</span><span class="ftt-timer-unit">s</span>
+      </div>
+      <div class="ftt-bar-wrap"><div id="ftt-bar" class="ftt-bar"></div></div>
+    </div>
+
+    <div class="ftt-instructions" id="ftt-instructions">
+      <span class="ftt-kb-hint">Press <kbd>SPACEBAR</kbd> to begin</span>
+      <button id="ftt-tap-btn" class="ftt-tap-btn" style="display:none">TAP TO BEGIN</button>
+      — keep tapping until the timer stops!
+    </div>
+  </div>
+
+  <!-- ══ Screen: Go / No-Go ══ -->
+  <div id="screen-gonogo" class="screen hidden">
+    <button class="btn-quit" id="btn-quit-gonogo">✕&nbsp; Quit to Menu</button>
+    <div class="screen-label">Go / No-Go · <span id="gng-progress">— / —</span></div>
+
+    <div class="gng-cue">
+      Respond (<strong>SPACE</strong> or tap) on <span style="color:#34d399;font-weight:700">GO</span> —
+      <strong>withhold</strong> on <span style="color:#ff6b5a;font-weight:700">STOP</span>
+    </div>
+
+    <div class="gng-stage">
+      <button id="gng-stim" class="gng-stim idle" aria-label="Go/No-Go stimulus"></button>
+    </div>
+
+    <div id="gng-feedback" class="gng-feedback">&nbsp;</div>
+
+    <div class="nback-live-stats">
+      <div class="live-stat"><div class="live-stat-val" id="gng-hits">0</div><div class="live-stat-label">Go Hits</div></div>
+      <div class="live-stat"><div class="live-stat-val" id="gng-comm">0</div><div class="live-stat-label">No-Go Errors</div></div>
+      <div class="live-stat"><div class="live-stat-val" id="gng-rt">—</div><div class="live-stat-label">Avg RT ms</div></div>
+    </div>
+  </div>
+
+  <!-- ══ Screen: Trail Making Test — Part B ══ -->
+  <div id="screen-trails" class="screen hidden">
+    <button class="btn-quit" id="btn-quit-trails">✕&nbsp; Quit to Menu</button>
+    <div class="screen-label">Trail Making · Part B</div>
+
+    <div class="tmt-cue">
+      Tap the circles in order — <strong>1 → A → 2 → B → 3 → C …</strong> alternating number &amp; letter
+    </div>
+
+    <div id="tmt-board" class="tmt-board">
+      <svg id="tmt-lines" class="tmt-lines"></svg>
+      <div id="tmt-nodes" class="tmt-nodes"></div>
+    </div>
+
+    <div class="nback-live-stats">
+      <div class="live-stat"><div class="live-stat-val" id="tmt-timer">0.0</div><div class="live-stat-label">Seconds</div></div>
+      <div class="live-stat"><div class="live-stat-val" id="tmt-next">1</div><div class="live-stat-label">Next Target</div></div>
+      <div class="live-stat"><div class="live-stat-val" id="tmt-errors">0</div><div class="live-stat-label">Errors</div></div>
+    </div>
+  </div>
+
+  <!-- ══ Screen: Rest / Baseline (Full Clinical Battery) ══ -->
+  <div id="screen-rest" class="screen hidden">
+    <div class="screen-label">Rest &amp; Baseline</div>
+    <div class="rest-big" id="rest-count">10</div>
+    <div class="rest-sub">Relax — letting the network settle to a resting baseline.</div>
+    <div class="fluency-bar-wrap"><div id="rest-bar" class="rest-bar"></div></div>
+    <div class="rest-next" id="rest-next"></div>
+  </div>
+
+  <!-- ══ Screen: Result (shared) ══ -->
+  <div id="screen-result" class="screen hidden">
+    <div class="screen-label">Test Complete</div>
+    <div class="score-wrap">
+      <div id="score-num">0</div>
+      <div id="score-tag"></div>
+    </div>
+    <div id="result-msg"></div>
+    <div id="brain-msg"></div>
+    <div id="validity-warning" class="validity-warning hidden">
+      ⚠ Validity note — this score is extremely low and may reflect low engagement or task misunderstanding rather than genuine impairment. Consider re-administering with clear instructions.
+    </div>
+    <div class="citation-block hidden" id="citation-block">
+      <div class="citation-label">Peer-Reviewed Validation</div>
+      <div id="citation-text"></div>
+    </div>
+    <button id="btn-reset" class="btn-secondary">↺&nbsp; Back to Menu</button>
+  </div>
+
+</div><!-- /#panel -->
+
+<!-- ═══════════════════════════════════════════════
+     PATIENT INTAKE MODAL
+════════════════════════════════════════════════ -->
+<div id="intake-screen" class="hidden">
+  <div id="intake-modal">
+    <div class="intake-header">
+      <div class="intake-header-icon">🧠</div>
+      <div>
+        <div class="intake-title">Patient Intake</div>
+        <div class="intake-subtitle">Demographic data grounds the normative Z-score analysis and clinical report. Complete once per patient session.</div>
+      </div>
+    </div>
+
+    <div class="intake-grid">
+      <div class="intake-field">
+        <label class="intake-label" for="intake-age">Age</label>
+        <input type="number" id="intake-age" class="intake-input" min="16" max="99" placeholder="e.g. 34">
+      </div>
+      <div class="intake-field">
+        <label class="intake-label" for="intake-edu">Years of Education</label>
+        <input type="number" id="intake-edu" class="intake-input" min="0" max="30" placeholder="e.g. 16">
+      </div>
+      <div class="intake-field intake-field--full">
+        <label class="intake-label" for="intake-handedness">Handedness</label>
+        <select id="intake-handedness" class="intake-input">
+          <option value="">— Select —</option>
+          <option value="R">Right-handed</option>
+          <option value="L">Left-handed</option>
+          <option value="A">Ambidextrous</option>
+        </select>
+      </div>
+      <div class="intake-field intake-field--full">
+        <label class="intake-label">Biological Sex</label>
+        <div class="intake-seg" id="intake-sex">
+          <button type="button" class="seg-btn" data-val="M">Male</button>
+          <button type="button" class="seg-btn" data-val="F">Female</button>
+          <button type="button" class="seg-btn" data-val="O">Prefer not to say</button>
+        </div>
+      </div>
+      <div class="intake-field intake-field--full">
+        <label class="intake-label" for="intake-clarity">
+          Subjective Mental Clarity Today
+          <span class="clarity-val-badge" id="clarity-val">5</span> / 10
+        </label>
+        <input type="range" id="intake-clarity" class="intake-slider" min="1" max="10" value="5">
+        <div class="slider-ticks"><span>Low (1)</span><span>High (10)</span></div>
+      </div>
+    </div>
+
+    <div class="intake-section-title">Clinical Modifiers</div>
+    <div class="intake-checks">
+      <label class="intake-check-label">
+        <input type="checkbox" id="intake-sleep">
+        <span class="check-box"></span>
+        <span>Acute Sleep Deprivation &mdash; fewer than 5 hours last night</span>
+      </label>
+      <label class="intake-check-label">
+        <input type="checkbox" id="intake-tbi">
+        <span class="check-box"></span>
+        <span>History of TBI / Concussion (any severity)</span>
+      </label>
+      <label class="intake-check-label">
+        <input type="checkbox" id="intake-colorblind">
+        <span class="check-box"></span>
+        <span>Known Colorblindness / Color Vision Deficit <em style="color:#8A9ABB;font-size:11px;">(Stroop Task will be flagged invalid)</em></span>
+      </label>
+      <label class="intake-check-label">
+        <input type="checkbox" id="intake-meds">
+        <span class="check-box"></span>
+        <span>Currently taking psychoactive medications <em style="color:#8A9ABB;font-size:11px;">(e.g., SSRIs, stimulants, benzodiazepines)</em></span>
+      </label>
+    </div>
+
+    <div id="intake-error" class="intake-error"></div>
+
+    <button id="btn-intake-submit" class="btn-primary" style="width:100%;margin-top:22px;padding:13px;">
+      Begin Assessment &#8250;
+    </button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     TIMELINE DASHBOARD OVERLAY
+════════════════════════════════════════════════ -->
+<div id="dashboard-panel" class="hidden">
+  <div id="dashboard-inner">
+    <div class="research-watermark">Research Prototype &mdash; Not for Diagnostic Use &mdash; Synthetic Normative Bases</div>
+    <div class="dashboard-header">
+      <div>
+        <div class="dashboard-title">Clinical Performance Timeline</div>
+        <div class="dashboard-subtitle">Longitudinal cognitive assessment — session data</div>
+      </div>
+      <button id="btn-close-dashboard" aria-label="Close dashboard">&#215;</button>
+    </div>
+
+    <div id="profile-summary"></div>
+    <div id="confounder-alert" class="confounder-alert hidden">
+      <div class="ca-icon">!</div>
+      <div>
+        <div class="ca-title">Clinical Confounder Alert</div>
+        <div class="ca-body" id="confounder-text"></div>
+      </div>
+    </div>
+
+    <div class="chart-legend">
+      <span class="chart-legend-item">
+        <span class="legend-dot" style="background:#3B7BF8"></span>Stroop Task
+      </span>
+      <span class="chart-legend-item">
+        <span class="legend-dot" style="background:#22C97A"></span>N-Back Memory
+      </span>
+      <span class="chart-legend-item">
+        <span class="legend-dot" style="background:#F87B3B"></span>Reading Speed
+      </span>
+      <span class="chart-legend-item">
+        <span class="legend-dot" style="background:#E0913F"></span>Corsi Span
+      </span>
+      <span class="chart-legend-item">
+        <span class="legend-dot" style="background:#15B8A6"></span>Verbal Fluency
+      </span>
+      <span class="chart-legend-item">
+        <span class="legend-dot" style="background:#C95AE0"></span>RAADS-R
+      </span>
+      <span class="chart-legend-item">
+        <span class="legend-dash"></span>Clinical Baseline 80%
+      </span>
+    </div>
+
+    <div id="chart-container"></div>
+    <div id="clinical-summary"></div>
+
+    <div style="margin-top:16px;border-top:1px solid #EEF3FF;padding-top:14px;">
+      <button id="btn-generate-twin" class="btn-primary btn-twin">
+        &#9670;&nbsp; Generate Digital Brain Twin
+      </button>
+      <div style="font-size:10px;color:#A8B8D0;text-align:center;margin-top:7px;line-height:1.5;">
+        Renders white matter tracts &amp; structural predictions from your DTI/fMRI research correlates
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:15px;">
+      <button id="btn-clear-history" class="btn-secondary" style="color:#d9534f;margin-top:15px;">Clear History</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     DIGITAL BRAIN TWIN HUD
+════════════════════════════════════════════════ -->
+<div id="digital-twin-hud" class="hidden">
+  <div id="dth-panel">
+    <div class="dth-header">
+      <div>
+        <div class="dth-title">&#9670; Digital Brain Twin &mdash; White Matter Analysis</div>
+        <div class="dth-subtitle">DTI/fMRI-mapped structural predictions based on your cognitive performance data</div>
+        <!-- High-visibility render-mode toggle: functional hologram vs anatomical scan -->
+        <div class="dth-toggle-wrap">
+          <span class="dth-toggle-label">View:</span>
+          <div class="dth-toggle dth-mode-toggle">
+            <button class="dth-toggle-btn dth-active" id="btn-mode-hologram">&#9673;&nbsp; Functional Hologram</button>
+            <button class="dth-toggle-btn" id="btn-mode-anatomical">&#9636;&nbsp; Anatomical Scan</button>
+          </div>
+        </div>
+        <!-- Baseline comparison toggle -->
+        <div class="dth-toggle-wrap">
+          <span class="dth-toggle-label">Data:</span>
+          <div class="dth-toggle">
+            <button class="dth-toggle-btn dth-active" id="btn-user-profile">User Profile</button>
+            <button class="dth-toggle-btn" id="btn-healthy-baseline">Healthy Baseline</button>
+          </div>
+        </div>
+      </div>
+      <div class="dth-header-actions">
+        <button id="btn-play-tour">&#9654;&nbsp; Play Tour</button>
+        <button id="btn-surgical-mode">&#9877;&nbsp; Surgical Planning</button>
+        <button id="btn-load-scan">&#9635;&nbsp; Load Real Scan</button>
+        <button id="btn-compare-baseline">&#8646;&nbsp; Compare vs Baseline</button>
+        <button id="btn-export-pdf">&#8659;&nbsp; Export PDF</button>
+        <button id="btn-exit-twin">&#215;&nbsp; Exit</button>
+      </div>
+    </div>
+
+    <!-- §4D longitudinal projection slider + §3 surgical status strip -->
+    <div class="dth-tools">
+      <div class="dth-slider-wrap">
+        <span class="dth-tool-label">&#8986; Longitudinal Projection</span>
+        <input type="range" id="progress-slider" min="0" max="100" value="0" step="1" class="dth-slider">
+        <span id="progress-readout" class="dth-tool-val">Current Day</span>
+      </div>
+      <div id="lesion-tools" class="hidden">
+        <span class="dth-tool-label surgical">&#9877; Click the glass brain to place a lesion</span>
+        <button id="btn-clear-lesions">Clear Lesions</button>
+      </div>
+    </div>
+
+    <div class="dth-body">
+      <div id="dth-radar" class="dth-radar"></div>
+      <div id="dth-tracts" class="dth-tracts"></div>
+    </div>
+    <div id="lesion-warnings" class="lesion-warnings hidden"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     LIVE CLINICAL INSIGHT PANEL (syncs to the cinematic tour)
+════════════════════════════════════════════════ -->
+<div id="clinical-insight" class="hidden">
+  <div class="ci-eyebrow">Clinical Insight</div>
+  <div class="ci-region" id="ci-region">—</div>
+  <div class="ci-test" id="ci-test"></div>
+  <span class="ci-badge" id="ci-badge"></span>
+  <div class="ci-block">
+    <div class="ci-h">Normal Function</div>
+    <div id="ci-normal"></div>
+  </div>
+  <div class="ci-block">
+    <div class="ci-h">What This Test Measures</div>
+    <div id="ci-measures"></div>
+  </div>
+  <div class="ci-block">
+    <div class="ci-h">Pathophysiological Meaning</div>
+    <div id="ci-patho"></div>
+  </div>
+  <div class="ci-cite" id="ci-cite"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     RIGHT PANEL — API cheatsheet
+════════════════════════════════════════════════ -->
+<div id="api-panel">
+  <div class="api-title">JS Console API</div>
+  <pre><span class="c">// ── Cognitive regions ──</span>
+<span class="fn">brain.activateRegion</span>(<span class="s">'readingGame'</span>)
+<span class="fn">brain.activateRegion</span>(<span class="s">'nBackGame'</span>)
+<span class="fn">brain.deactivateRegions</span>()
+
+<span class="c">// ── Neural connections ──</span>
+<span class="fn">brain.drawConnection</span>(<span class="s">'leftOccipital'</span>, <span class="s">'leftFrontal'</span>)
+<span class="fn">brain.clearConnections</span>()
+
+<span class="c">// ── Neuroplasticity ──</span>
+<span class="fn">brain.triggerNeuroplasticity</span>(<span class="s">'leftFrontal'</span>, <span class="n">1.06</span>)
+
+<span class="c">// ── Appearance ──</span>
+<span class="fn">brain.setColor</span>(<span class="s">'leftFrontal'</span>, <span class="s">'#ff4444'</span>)
+<span class="fn">brain.resetColors</span>()</pre>
+</div>
+
+<div id="hint">Drag to rotate &nbsp;·&nbsp; Scroll to zoom &nbsp;·&nbsp; Right-drag to pan</div>
+
+<!-- ═══ Patient vs Healthy-Baseline side-by-side comparison ═══ -->
+<div id="compare-overlay">
+  <div class="cmp-panel">
+    <div class="cmp-head">
+      <div>
+        <div class="cmp-title">&#8646; Patient vs Healthy Baseline</div>
+        <div class="cmp-sub">Same viewpoint, two model states. Left: the patient's Digital Twin with modelled deficits &amp; structural atrophy. Right: an age/education-matched healthy reference. Differences below are <em>modelled from cognitive Z-scores</em> against the DTI/volumetry literature — not direct measurements.</div>
+      </div>
+      <button id="cmp-close">&#215;&nbsp; Close</button>
+    </div>
+    <div class="cmp-brains">
+      <div class="cmp-brain patient">
+        <div class="cmp-brain-label">&#9679; Patient Twin</div>
+        <img id="cmp-img-patient" alt="Patient brain model" />
+      </div>
+      <div class="cmp-brain baseline">
+        <div class="cmp-brain-label">&#9679; Healthy Baseline</div>
+        <img id="cmp-img-baseline" alt="Healthy baseline brain model" />
+      </div>
+    </div>
+    <div class="cmp-diffs">
+      <div class="cmp-diffs-title">Scientific Differences &mdash; Structural &amp; Functional (modelled)</div>
+      <div id="cmp-diffs-list"></div>
+      <div class="cmp-refs">
+        Structural correlates modelled from performance Z-scores using published relationships between cognition and
+        white-matter FA / grey-matter volume: Kantarci et&nbsp;al. (2011), Neurology; Fjell &amp; Walhovd (2010), Rev Neurosci;
+        Madden et&nbsp;al. (2012), BBA — DTI of ageing; Hedman et&nbsp;al. (2012), Hum Brain Mapp (brain-volume change).
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ On-demand NiiVue importer (real CT/MRI) — separate WebGL context ═══ -->
+<div id="niivue-overlay">
+  <canvas id="niivue-real"></canvas>
+  <div class="nv-toolbar">
+    <div class="nv-title">&#9635; Real Patient Scan &mdash; NiiVue Viewer</div>
+    <div id="niivue-status" class="nv-status">Idle.</div>
+    <label class="nv-file-btn">Choose file&hellip;
+      <input type="file" id="niivue-file" accept=".nii,.nii.gz,.gz,.dcm" hidden>
+    </label>
+    <button id="btn-close-niivue">&#215;&nbsp; Close &amp; Resume 3D</button>
+  </div>
+  <div class="nv-hint">Drag &amp; drop a <b>.nii&nbsp;/&nbsp;.nii.gz</b> (or a DICOM series) anywhere on this panel. The Three.js engine is paused to keep the GPU free.</div>
+</div>
+
+<!-- Global render-mode toggle — always available (menu, timeline, twin) -->
+<div id="view-mode-global">
+  <span class="vmg-label">View</span>
+  <button class="vmg-btn vmg-active" id="vmg-hologram">&#9673;&nbsp;Functional Hologram</button>
+  <button class="vmg-btn" id="vmg-anatomical">&#9636;&nbsp;Anatomical Scan</button>
+</div>
+
+<div id="mobile-backdrop"></div>
+<button id="mobile-fab" aria-label="Open menu">
+  🧠 Tests
+</button>
+
+<!-- ═══════════════════════════════════════════════
+     PRINT LAYOUT — hidden on screen, shown @media print
+════════════════════════════════════════════════ -->
+<div id="print-layout">
+  <div class="print-watermark">Research Prototype &mdash; Not for Diagnostic Use &mdash; Synthetic Normative Bases</div>
+  <div class="pr-header">
+    <div class="pr-logo-row">
+      <span class="pr-logo-icon">🧠</span>
+      <div>
+        <div class="pr-title">Digital Brain Twin &mdash; Clinical Connectome Report</div>
+        <div class="pr-subtitle">DTI/fMRI-mapped white matter structural predictions based on cognitive performance</div>
+      </div>
+    </div>
+    <div class="pr-meta">
+      <span>Generated: <strong id="print-date"></strong></span>
+      &emsp;|&emsp;
+      <span>Brain Trainer &mdash; Cognitive Suite</span>
+    </div>
+    <hr class="pr-rule">
+  </div>
+
+  <div class="pr-dashboard">
+    <div class="pr-dash-profile" id="print-patient-profile"></div>
+    <div class="pr-dash-radar">
+      <div class="pr-section-label">Cognitive Footprint &mdash; Z-Scores</div>
+      <div id="print-radar" class="pr-radar-box"></div>
+    </div>
+  </div>
+
+  <div class="pr-two-col">
+    <div class="pr-snapshot-col">
+      <div class="pr-section-label">Digital Twin Snapshot</div>
+      <img id="print-brain-img" src="" alt="Brain mesh render with connectome node overlay" class="pr-brain-img" />
+      <div class="pr-snapshot-caption">
+        Cortical mesh with clinical connectome nodes overlaid at approximate MNI region centroids.
+        Deficit regions (hippocampus, amygdala, anterior cingulate, frontoparietal cortex) glow hot
+        red; hyper-connectivity glows violet.
+      </div>
+    </div>
+    <div class="pr-timeline-col">
+      <div class="pr-section-label">Clinical Performance Timeline</div>
+      <div id="print-timeline-svg"></div>
+    </div>
+  </div>
+
+  <hr class="pr-rule">
+
+  <div class="pr-section-label">White Matter Tract Analysis</div>
+  <div id="print-tract-findings"></div>
+
+  <hr class="pr-rule">
+
+  <div class="pr-section-label">References</div>
+  <ol id="print-citations-list" class="pr-citations"></ol>
+
+  <div class="pr-footer">
+    <em>This report is generated from a research prototype and does not constitute a medical diagnosis.
+    All structural predictions are modelled from peer-reviewed DTI/fMRI literature and should be
+    interpreted by a qualified clinician.</em>
+  </div>
+</div>
+
+<script>
+(function() {
+  const fab      = document.getElementById('mobile-fab');
+  const panel    = document.getElementById('panel');
+  const backdrop = document.getElementById('mobile-backdrop');
+  function open()  {
+    panel.classList.add('mobile-open');
+    backdrop.style.display = 'block';
+    fab.style.display = 'none';
+  }
+  function close() {
+    panel.classList.remove('mobile-open');
+    backdrop.style.display = 'none';
+    fab.style.display = '';
+  }
+  fab.addEventListener('click', open);
+  backdrop.addEventListener('click', close);
+  // Swipe down on the panel to close it
+  let startY = 0;
+  panel.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, { passive: true });
+  panel.addEventListener('touchend',   e => { if (e.changedTouches[0].clientY - startY > 60) close(); }, { passive: true });
+})();
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "@niivue/niivue": "https://esm.sh/@niivue/niivue@0.44.2"
+  }
+}
+</script>
+<script type="module" src="app.js?v=20260704b"></script>
+<script type="module" src="game.js?v=20260704b"></script>
+</body>
+</html>
